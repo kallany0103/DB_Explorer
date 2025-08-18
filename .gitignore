@@ -1,0 +1,9 @@
+__pyache__
+\__pycache__
+.pyc
+dialogs/__pycache__/sqlite_dialog.cpython-313.pyc
+dialogs/__pycache__/postgres_dialog.cpython-313.pyc
+dialogs/__pycache__/__init__.cpython-313.pyc
+dialogs/__pycache__/db.cpython-313.pyc
+dialogs/__pycache__/oracle_dialog.cpython-313.pyc
+__pycache__/main_window.cpython-313.pyc
