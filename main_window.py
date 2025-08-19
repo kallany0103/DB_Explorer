@@ -1987,6 +1987,32 @@ class MainWindow(QMainWindow):
         self.schema_model.setHorizontalHeaderLabels(["Name", "Type"])
         self.schema_tree.setColumnWidth(0, 200)  
         self.schema_tree.setColumnWidth(1, 100) 
+        header = self.schema_tree.header()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        header = self.schema_tree.header()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+
+
+        self.schema_tree.setStyleSheet("""
+    QHeaderView {
+        background-color: #a9a9a9;
+                                       
+    }
+    QHeaderView::section {
+        border-right: 1px solid #d3d3d3;
+        padding: 4px;
+        background-color: #a9a9a9;   
+    }
+    QTreeView {
+        gridline-color: #a9a9a9;
+    }
+""")
+
+
         db_path = conn_data.get("db_path")
         if not db_path or not os.path.exists(db_path):
             self.status.showMessage(
@@ -2016,7 +2042,7 @@ class MainWindow(QMainWindow):
                     pass
         except Exception as e:
             self.status.showMessage(f"Error loading SQLite schema: {e}", 5000)
-
+        
     def load_postgres_schema(self, conn_data):
         try:
             self.schema_model.clear()
@@ -2049,7 +2075,30 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'pg_conn') and self.pg_conn:
                 self.pg_conn.close()
         self.schema_tree.setColumnWidth(0, 200)  
-        self.schema_tree.setColumnWidth(1, 100) 
+        self.schema_tree.setColumnWidth(1,100) 
+        header = self.schema_tree.header()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+
+
+        self.schema_tree.setStyleSheet("""
+    QHeaderView {
+        background-color: #a9a9a9;
+                                       
+    }
+    QHeaderView::section {
+        border-right: 1px solid #d3d3d3;
+        padding: 4px;
+        background-color: #a9a9a9;   
+    }
+    QTreeView {
+        gridline-color: #a9a9a9;
+    }
+""")
+
+
+
     def show_schema_context_menu(self, position):
         index = self.schema_tree.indexAt(position)
         if not index.isValid():
