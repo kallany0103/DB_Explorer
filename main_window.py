@@ -575,18 +575,23 @@ class TablePropertiesDialog(QDialog):
         table_view.setModel(model)
         table_view.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers)
+        # Resize modes: আইকন কলামগুলো fixed, নাম Stretch, বাকিগুলো contents অনুযায়ী
         table_view.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents)
         table_view.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Fixed)
+            0, QHeaderView.ResizeMode.Fixed)   # Edit
         table_view.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Fixed)
+            1, QHeaderView.ResizeMode.Fixed)   # Delete
         table_view.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Stretch)
+            2, QHeaderView.ResizeMode.Stretch)  # Name
         table_view.horizontalHeader().setStyleSheet(
-            "QHeaderView::section { background-color: #cce5ff; padding: 4px; }")
-        table_view.setColumnWidth(0, 28)
-        table_view.setColumnWidth(1, 28)
+            "QHeaderView::section { background-color: ##e0e0e0; padding: 4px; }")
+
+        # Header center + padding
+        table_view.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        table_view.horizontalHeader().setStretchLastSection(True)
+        table_view.setColumnWidth(0, 56)
+        table_view.setColumnWidth(1, 56)
         columns_data = self._fetch_postgres_columns(
         ) if self.db_type == 'postgres' else self._fetch_sqlite_columns()
         edit_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
@@ -672,6 +677,11 @@ class TablePropertiesDialog(QDialog):
                 "QHeaderView::section { background-color: #e0e0e0; padding: 4px; }")
             table_view.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
 
+            # প্রতিটি table_view বানানোর পরপরই:
+            table_view.verticalHeader().setVisible(False)
+            table_view.verticalHeader().setDefaultSectionSize(26)
+            table_view.setWordWrap(False)
+
             model = QStandardItemModel()
             model.setHorizontalHeaderLabels(headers)
             table_view.setModel(model)
@@ -686,14 +696,34 @@ class TablePropertiesDialog(QDialog):
                     if item:
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
+               # Header align + look
+            table_view.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            # মডেলে ডাটা বসানোর পর, কলামভিত্তিক টেক্সট-অ্যালাইনমেন্ট:
+            for row in range(model.rowCount()):
+                for col in range(model.columnCount()):
+                    item = model.item(row, col)
+                    if not item:
+                        continue
+                    if col == 0:  # Name
+                        item.setTextAlignment(
+                            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+                    else:        # অন্য সব কলাম
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
             # Set resize modes for better display
             header = table_view.horizontalHeader()
             for col in range(model.columnCount()):
                 header.setSectionResizeMode(
                     col, QHeaderView.ResizeMode.Interactive)
+            # if model.columnCount() > 0:
+            #     header.setSectionResizeMode(
+            #         model.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
+
             if model.columnCount() > 0:
-                header.setSectionResizeMode(
-                    model.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
+                for c in range(model.columnCount()):
+                    header.setSectionResizeMode(
+                        c, QHeaderView.ResizeMode.Stretch)
 
             constraints_tab_widget.addTab(table_view, title)
         return container_widget
@@ -1985,8 +2015,8 @@ class MainWindow(QMainWindow):
     def load_sqlite_schema(self, conn_data):
         self.schema_model.clear()
         self.schema_model.setHorizontalHeaderLabels(["Name", "Type"])
-        self.schema_tree.setColumnWidth(0, 200)  
-        self.schema_tree.setColumnWidth(1, 100) 
+        self.schema_tree.setColumnWidth(0, 200)
+        self.schema_tree.setColumnWidth(1, 100)
         header = self.schema_tree.header()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
@@ -1995,7 +2025,6 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-
 
         self.schema_tree.setStyleSheet("""
     QHeaderView {
@@ -2011,7 +2040,6 @@ class MainWindow(QMainWindow):
         gridline-color: #a9a9a9;
     }
 """)
-
 
         db_path = conn_data.get("db_path")
         if not db_path or not os.path.exists(db_path):
@@ -2042,7 +2070,7 @@ class MainWindow(QMainWindow):
                     pass
         except Exception as e:
             self.status.showMessage(f"Error loading SQLite schema: {e}", 5000)
-        
+
     def load_postgres_schema(self, conn_data):
         try:
             self.schema_model.clear()
@@ -2074,13 +2102,12 @@ class MainWindow(QMainWindow):
             self.status.showMessage(f"Error loading schemas: {e}", 5000)
             if hasattr(self, 'pg_conn') and self.pg_conn:
                 self.pg_conn.close()
-        self.schema_tree.setColumnWidth(0, 200)  
-        self.schema_tree.setColumnWidth(1,100) 
+        self.schema_tree.setColumnWidth(0, 200)
+        self.schema_tree.setColumnWidth(1, 100)
         header = self.schema_tree.header()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-
 
         self.schema_tree.setStyleSheet("""
     QHeaderView {
@@ -2096,8 +2123,6 @@ class MainWindow(QMainWindow):
         gridline-color: #a9a9a9;
     }
 """)
-
-
 
     def show_schema_context_menu(self, position):
         index = self.schema_tree.indexAt(position)
