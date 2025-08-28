@@ -1549,8 +1549,7 @@ class MainWindow(QMainWindow):
     def _apply_styles(self):
         primary_color, header_color, selection_color = "#D3D3D3", "#A9A9A9", "#A9A9A9"
         text_color_on_primary, alternate_row_color, border_color = "#000000", "#f0f0f0", "#A9A9A9"
-        self.setStyleSheet(f"""QMainWindow, QToolBar, QStatusBar {{ background-color: {primary_color}; color: {text_color_on_primary}; }} QTreeView {{ background-color: white; alternate-background-color: {alternate_row_color}; border: 1px solid {border_color}; }} QTableView {{ alternate-background-color: {alternate_row_color}; background-color: white; gridline-color: #d0d0d0; border: 1px solid {border_color}; font-family: Arial, sans-serif; font-size: 9pt; }} QTableView::item {{ padding: 4px; }} QTableView::item:selected {{ background-color: {selection_color}; color: white; }} QHeaderView::section {{ background-color: {header_color}; color: white; padding: 6px; border: 1px solid {border_color}; font-weight: bold; font-size: 9pt; }} QTableView QTableCornerButton::section {{ background-color: {header_color}; border: 1px solid {border_color}; }} #resultsHeader QPushButton, #editorHeader QPushButton {{ background-color: #ffffff; border: 1px solid {border_color}; padding: 5px 15px; font-size: 9pt; }} #resultsHeader QPushButton:hover, #editorHeader QPushButton:hover {{ background-color: {primary_color}; }} #resultsHeader QPushButton:checked, #editorHeader QPushButton:checked {{ background-color: {selection_color}; border-bottom: 1px solid {selection_color}; font-weight: bold; color: white; }} #resultsHeader, #editorHeader {{ background-color: {alternate_row_color}; padding-bottom: -1px; }} #messageView, #history_details_view, QTextEdit, QPlainTextEdit {{ font-family: Consolas, monospace; font-size: 10pt; background-color: white; border: 1px solid {border_color}; }} #tab_status_label {{ padding: 3px 5px; background-color: {alternate_row_color}; border-top: 1px solid {border_color}; }} QGroupBox {{ font-size: 9pt; font-weight: bold; color: {text_color_on_primary}; }} QTabWidget::pane {{ border-top: 1px solid {border_color}; }} QTabBar::tab {{ background: #E0E0E0; border: 1px solid {border_color}; padding: 5px 10px; border-bottom: none; }} QTabBar::tab:selected {{ background: {selection_color}; color: white; }} QComboBox {{ border: 1px solid {border_color}; padding: 2px; background-color: white; }}""")
-
+        self.setStyleSheet(f"""QMainWindow, QToolBar, QStatusBar {{ background-color: {primary_color}; color: {text_color_on_primary}; }} QTreeView {{ background-color: white; alternate-background-color: {alternate_row_color}; border: 1px solid {border_color}; }} QTableView {{ alternate-background-color: {alternate_row_color}; background-color: white; gridline-color: #a9a9a9; border: 1px solid {border_color}; font-family: Arial, sans-serif; font-size: 9pt;}} QTableView::item {{ padding: 4px; }} QTableView::item:selected {{ background-color: {selection_color}; color: white; }} QHeaderView::section {{ background-color: {header_color}; color: white; padding: 4px; border: none; border-right: 1px solid #d3d3d3; border-bottom: 1px solid {border_color}; font-weight: bold; font-size: 9pt;  }} QTableView QTableCornerButton::section {{ background-color: {header_color}; border: 1px solid {border_color}; }} #resultsHeader QPushButton, #editorHeader QPushButton {{ background-color: #ffffff; border: 1px solid {border_color}; padding: 5px 15px; font-size: 9pt; }} #resultsHeader QPushButton:hover, #editorHeader QPushButton:hover {{ background-color: {primary_color}; }} #resultsHeader QPushButton:checked, #editorHeader QPushButton:checked {{ background-color: {selection_color}; border-bottom: 1px solid {selection_color}; font-weight: bold; color: white; }} #resultsHeader, #editorHeader {{ background-color: {alternate_row_color}; padding-bottom: -1px; }} #messageView, #history_details_view, QTextEdit {{ font-family: Consolas, monospace; font-size: 10pt; background-color: white; border: 1px solid {border_color}; }} #tab_status_label {{ padding: 3px 5px; background-color: {alternate_row_color}; border-top: 1px solid {border_color}; }} QGroupBox {{ font-size: 9pt; font-weight: bold; color: {text_color_on_primary}; }} QTabWidget::pane {{ border-top: 1px solid {border_color}; }} QTabBar::tab {{ background: #E0E0E0; border: 1px solid {border_color}; padding: 5px 10px; border-bottom: none; }} QTabBar::tab:selected {{ background: {selection_color}; color: white; }} QComboBox {{ border: 1px solid {border_color}; padding: 2px; background-color: white; }}""")
     # <<< MODIFIED >>> The main tab creation logic is heavily updated here
     def add_tab(self):
         tab_content = QWidget()
@@ -1932,19 +1931,45 @@ class MainWindow(QMainWindow):
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def show_connection_details(self, item):
-        conn_data = item.data(Qt.ItemDataRole.UserRole)
-        if not conn_data:
-            QMessageBox.warning(
-                self, "Error", "Could not retrieve connection data.")
-            return
-        details_title = f"Connection Details: {conn_data.get('name')}"
-        if conn_data.get("host"):
-            details_text = f"<b>Name:</b> {conn_data.get('name', 'N/A')}<br><b>Type:</b> PostgreSQL<br><b>Host:</b> {conn_data.get('host', 'N/A')}<br><b>Port:</b> {conn_data.get('port', 'N/A')}<br><b>Database:</b> {conn_data.get('database', 'N/A')}<br><b>User:</b> {conn_data.get('user', 'N/A')}"
-        elif conn_data.get("db_path"):
-            details_text = f"<b>Name:</b> {conn_data.get('name', 'N/A')}<br><b>Type:</b> SQLite<br><b>Database Path:</b> {conn_data.get('db_path', 'N/A')}"
-        else:
-            details_text = "Could not determine connection type or details."
-        QMessageBox.information(self, details_title, details_text)
+      conn_data = item.data(Qt.ItemDataRole.UserRole)
+      if not conn_data:
+          QMessageBox.warning(self, "Error", "Could not retrieve connection data.")
+          return
+
+      details_title = f"Connection Details: {conn_data.get('name')}"
+
+      if conn_data.get("host"):  # PostgreSQL
+          details_text = (
+              f"<b>Name:</b> {conn_data.get('name', 'N/A')}<br>"
+              f"<b>Type:</b> PostgreSQL<br>"
+              f"<b>Host:</b> {conn_data.get('host', 'N/A')}<br>"
+              f"<b>Port:</b> {conn_data.get('port', 'N/A')}<br>"
+              f"<b>Database:</b> {conn_data.get('database', 'N/A')}<br>"
+              f"<b>User:</b> {conn_data.get('user', 'N/A')}"
+          )
+      elif conn_data.get("db_path"):  # SQLite
+          details_text = (
+              f"<b>Name:</b> {conn_data.get('name', 'N/A')}<br>"
+              f"<b>Type:</b> SQLite<br>"
+              f"<b>Database Path:</b> {conn_data.get('db_path', 'N/A')}"
+          )
+      else:
+          details_text = "Could not determine connection type or details."
+
+      msg = QMessageBox(self)
+      msg.setWindowTitle(details_title)
+      msg.setIcon(QMessageBox.Icon.Information)
+      msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+
+      # custom QLabel for fixed size
+      label = QLabel(details_text)
+      label.setTextFormat(Qt.TextFormat.RichText)
+      label.setWordWrap(True)
+      label.setMinimumSize(400, 200)   # force medium size
+      msg.layout().addWidget(label, 0, 1)  # replace default text widget
+
+      msg.exec()
+
 
     def add_subcategory(self, parent_item):
         name, ok = QInputDialog.getText(self, "New Group", "Group name:")
