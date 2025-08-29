@@ -14,13 +14,15 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTreeView, QTabWidget,
     QSplitter, QLineEdit, QTextEdit, QComboBox, QTableView, QVBoxLayout, QWidget, QStatusBar, QToolBar, QFileDialog,
     QSizePolicy, QPushButton, QInputDialog, QMessageBox, QMenu, QAbstractItemView, QDialog, QFormLayout, QHBoxLayout,
-    QStackedWidget, QLabel, QGroupBox, QDialogButtonBox, QCheckBox, QRadioButton, QStyle, QHeaderView, QFrame
+    QStackedWidget, QLabel, QGroupBox, QDialogButtonBox, QCheckBox, QRadioButton, QStyle, QHeaderView, QFrame,
+    QPlainTextEdit
 )
 from PyQt6.QtGui import (
-    QAction, QIcon, QStandardItemModel, QStandardItem, QFont, QMovie, QDesktopServices, QColor, QBrush
+    QAction, QIcon, QStandardItemModel, QStandardItem, QFont, QMovie, QDesktopServices, QColor, QBrush, QPainter,
+    QTextFormat, QPolygon
 )
 from PyQt6.QtCore import (
-    Qt, QDir, QModelIndex, QSize, QObject, pyqtSignal, QRunnable, QThreadPool, QTimer, QUrl
+    Qt, QDir, QModelIndex, QSize, QObject, pyqtSignal, QRunnable, QThreadPool, QTimer, QUrl, QRect, QPoint
 )
 
 # Importing classes from the dialogs folder
@@ -30,9 +32,283 @@ from dialogs.sqlite_dialog import SQLiteConnectionDialog
 import dialogs.db as db
 # count rows
 
-# <<< NEW CLASS >>> কলাম এডিট করার জন্য নতুন ডায়ালগ
+# <<< NEW CLASS >>> Line number widget for the code editor
 
 
+class LineNumberArea(QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.codeEditor = editor
+        self.setMouseTracking(True)
+
+    def sizeHint(self):
+        return QSize(self.codeEditor.lineNumberAreaWidth(), 0)
+
+    def paintEvent(self, event):
+        self.codeEditor.lineNumberAreaPaintEvent(event)
+
+    def mousePressEvent(self, event):
+        self.codeEditor.handle_line_number_area_click(event)
+
+
+# <<< NEW CLASS >>> Custom code editor with line numbers and folding
+class CodeEditor(QPlainTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.lineNumberArea = LineNumberArea(self)
+        # folding_markers: {start_line_num: {'end': end_line_num, 'open': bool}}
+        self.folding_markers = {}
+
+        self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
+        self.updateRequest.connect(self.updateLineNumberArea)
+        self.cursorPositionChanged.connect(self.highlightCurrentLine)
+        self.textChanged.connect(self.on_text_changed)
+
+        self.updateLineNumberAreaWidth(0)
+        self.highlightCurrentLine()
+
+    # <<< FIX #2 >>> ADDED THE MISSING highlightCurrentLine METHOD
+
+    def handle_line_number_area_click(self, event):
+        # Qt6: .position(), পুরনো ভার্সনে .pos()
+        y = event.position().y() if hasattr(event, "position") else event.pos().y()
+
+        block = self.firstVisibleBlock()
+        top = self.blockBoundingGeometry(
+            block).translated(self.contentOffset()).top()
+
+        while block.isValid():
+            bottom = top + self.blockBoundingRect(block).height()
+            if top <= y < bottom:
+                bn = block.blockNumber()
+                if bn in self.folding_markers:
+                    self.toggle_fold(bn)
+                break
+            block = block.next()
+            top = bottom
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        # marker এলাকাতে হলে কার্সর বদলান
+        self.lineNumberArea.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def highlightCurrentLine(self):
+        extraSelections = []
+
+        if not self.isReadOnly():
+            # selection = self.ExtraSelection()
+            selection = QTextEdit.ExtraSelection()
+
+            # You can change the highlight color here
+            lineColor = QColor("#e8f4ff")  # A light blue color
+            selection.format.setBackground(lineColor)
+
+            # This makes the highlight span the entire width of the editor
+            selection.format.setProperty(
+                QTextFormat.Property.FullWidthSelection, True)
+
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            extraSelections.append(selection)
+
+        self.setExtraSelections(extraSelections)
+
+    def on_text_changed(self):
+        # A simple debounce mechanism could be added here if performance is an issue
+        self.update_folding_markers()
+
+    def lineNumberAreaWidth(self):
+        digits = 1
+        max_num = max(1, self.blockCount())
+        while max_num >= 10:
+            max_num /= 10
+            digits += 1
+        # Add space for folding markers (approx 15px) + padding
+        space = 20 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+
+    def updateLineNumberAreaWidth(self, _):
+        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+
+    def updateLineNumberArea(self, rect, dy):
+        if dy:
+            self.lineNumberArea.scroll(0, dy)
+        else:
+            self.lineNumberArea.update(
+                0, rect.y(), self.lineNumberArea.width(), rect.height())
+
+        if rect.contains(self.viewport().rect()):
+            self.updateLineNumberAreaWidth(0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.lineNumberArea.setGeometry(
+            QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
+
+    # <<< FIX #1 >>> CORRECTED THE PAINT EVENT FOR FOLDING MARKERS
+    def lineNumberAreaPaintEvent(self, event):
+        painter = QPainter(self.lineNumberArea)
+        painter.fillRect(event.rect(), QColor("#f0f0f0"))
+
+        block = self.firstVisibleBlock()
+        blockNumber = block.blockNumber()
+        top = self.blockBoundingGeometry(
+            block).translated(self.contentOffset()).top()
+        bottom = top + self.blockBoundingRect(block).height()
+        height = self.fontMetrics().height()
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+               # === Line Number ===
+                number = str(blockNumber + 1)
+                painter.setPen(Qt.GlobalColor.darkGray)
+                painter.drawText(
+                    0, int(top),
+                    self.lineNumberArea.width() - 18, height,
+                    Qt.AlignmentFlag.AlignRight,
+                    number
+                )
+
+                # === Folding Marker ===
+                if blockNumber in self.folding_markers:
+                    marker_rect = QRect(self.lineNumberArea.width() - 16,
+                                        int(top) + (height - 10) // 2,
+                                        10, 10)
+                    painter.setPen(Qt.GlobalColor.black)
+                    painter.setBrush(QBrush(Qt.GlobalColor.black))
+
+                    if self.folding_markers[blockNumber]['open']:
+                        # ▼ Down triangle
+                        points = [
+                            QPoint(marker_rect.left(), marker_rect.top()),
+                            QPoint(marker_rect.right(), marker_rect.top()),
+                            QPoint(marker_rect.center().x(),
+                                   marker_rect.bottom())
+                        ]
+                    else:
+                        # ► Right triangle
+                        points = [
+                            QPoint(marker_rect.left(), marker_rect.top()),
+                            QPoint(marker_rect.left(), marker_rect.bottom()),
+                            QPoint(marker_rect.right(),
+                                   marker_rect.center().y())
+                        ]
+                    # Moved this line outside the if/else to draw in both cases
+                    painter.drawPolygon(QPolygon(points))
+
+            block = block.next()
+            top = bottom
+            bottom = top + self.blockBoundingRect(block).height()
+            blockNumber += 1
+
+    def update_folding_markers(self):
+        new_markers = {}
+        processed_lines = set()
+
+        block = self.document().begin()
+        while block.isValid():
+            block_num = block.blockNumber()
+            if block_num in processed_lines:
+                block = block.next()
+                continue
+
+            # Find end of statement
+            temp_block = block
+            statement_text = ""
+            end_block_num = -1
+            while temp_block.isValid():
+                statement_text += temp_block.text()
+                if ';' in statement_text.strip():
+                    end_block_num = temp_block.blockNumber()
+                    break
+                temp_block = temp_block.next()
+
+            if end_block_num > block_num:
+                # Found a multi-line statement
+                is_open = self.folding_markers.get(
+                    block_num, {'open': True})['open']
+                new_markers[block_num] = {
+                    'end': end_block_num, 'open': is_open}
+                for i in range(block_num, end_block_num + 1):
+                    processed_lines.add(i)
+
+            # Move to the next block after the processed statement
+            if end_block_num != -1:
+                block = self.document().findBlockByNumber(end_block_num).next()
+            else:
+                block = block.next()
+
+        self.folding_markers = new_markers
+        self.lineNumberArea.update()
+
+    def mousePressEvent(self, event):
+        margin = self.viewportMargins().left()
+        click_x = event.pos().x()
+
+        # Click in line number/folding area
+        if click_x < margin:
+            block = self.firstVisibleBlock()
+            top = self.blockBoundingGeometry(
+                block).translated(self.contentOffset()).top()
+
+            while block.isValid():
+                bottom = top + self.blockBoundingRect(block).height()
+                if top <= event.pos().y() < bottom:
+                    if block.blockNumber() in self.folding_markers:
+                        self.toggle_fold(block.blockNumber())
+                        return
+                    break
+                block = block.next()
+                top = bottom
+
+        super().mousePressEvent(event)
+
+    def toggle_fold(self, block_number: int) -> None:
+        # """
+        #  Fold/unfold the region that starts at `block_number`.
+        # Expects self.folding_markers[block_number] = {"open": bool, "end": int}
+        # """
+       
+        if not hasattr(self, "folding_markers") or block_number not in self.folding_markers:
+            return
+
+        marker = self.folding_markers[block_number]
+        is_open = marker.get("open", True)
+        end_block_num = marker.get("end", block_number)
+
+        # toggle state update
+        marker["open"] = not is_open
+
+        doc = self.document()
+        start_block = doc.findBlockByNumber(block_number)
+
+        # terget end-block find (invalid than end)
+        end_block = doc.findBlockByNumber(end_block_num)
+        if not end_block.isValid():
+            # fallback
+            end_block_num = doc.blockCount() - 1
+            end_block = doc.findBlockByNumber(end_block_num)
+
+        # 
+        block = start_block.next()
+        while block.isValid() and block.blockNumber() <= end_block_num:
+            block.setVisible(not is_open)  
+            block = block.next()
+
+       
+        start_pos = start_block.position()
+        end_pos = end_block.position() + end_block.length()
+        doc.markContentsDirty(start_pos, max(0, end_pos - start_pos))
+
+        # ---- UI refresh ----
+        # Text area ও line number area update
+        self.viewport().update()
+        if hasattr(self, "lineNumberArea") and self.lineNumberArea is not None:
+            self.lineNumberArea.update()
+
+
+# <<< NEW CLASS >>> column edit
 class ColumnEditDialog(QDialog):
     def __init__(self, db_type, column_data, parent=None):
         super().__init__(parent)
@@ -257,7 +533,6 @@ class ExportDialog(QDialog):
             "quote": self.quote_edit.text()
         }
 
-
 class TablePropertiesDialog(QDialog):
     def __init__(self, item_data, table_name, parent=None):
         super().__init__(parent)
@@ -284,7 +559,7 @@ class TablePropertiesDialog(QDialog):
         button_box.addWidget(ok_button)
         self.main_layout.addLayout(button_box)
 
-    # <<< MODIFIED >>> নতুন মেথড: UI রিফ্রেশ করার জন্য
+    # <<< MODIFIED >>> new method: UI refresh
     def refresh_properties(self):
         # Clear existing tabs
         while self.tab_widget.count() > 0:
@@ -381,7 +656,7 @@ class TablePropertiesDialog(QDialog):
         self.add_parent_combo.removeItem(index)
         self.add_parent_combo.setCurrentIndex(0)
 
-    # <<< MODIFIED >>> Edit Column এর কার্যকারিতা যোগ করা হয়েছে
+    # <<< MODIFIED >>> Edit Column 
     def _edit_column(self, column_name):
         conn = None
         column_data = {}
@@ -575,18 +850,23 @@ class TablePropertiesDialog(QDialog):
         table_view.setModel(model)
         table_view.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers)
+        # Resize modes: icon columns fixed, name Stretch
         table_view.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents)
         table_view.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Fixed)
+            0, QHeaderView.ResizeMode.Fixed)   # Edit
         table_view.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Fixed)
+            1, QHeaderView.ResizeMode.Fixed)   # Delete
         table_view.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Stretch)
+            2, QHeaderView.ResizeMode.Stretch)  # Name
         table_view.horizontalHeader().setStyleSheet(
-            "QHeaderView::section { background-color: #cce5ff; padding: 4px; }")
-        table_view.setColumnWidth(0, 28)
-        table_view.setColumnWidth(1, 28)
+            "QHeaderView::section { background-color: ##e0e0e0; padding: 4px; }")
+
+        # Header center + padding
+        table_view.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        table_view.horizontalHeader().setStretchLastSection(True)
+        table_view.setColumnWidth(0, 56)
+        table_view.setColumnWidth(1, 56)
         columns_data = self._fetch_postgres_columns(
         ) if self.db_type == 'postgres' else self._fetch_sqlite_columns()
         edit_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
@@ -646,7 +926,7 @@ class TablePropertiesDialog(QDialog):
                     model.index(row_idx, col_idx), container)
         return widget
 
-    # <<< MODIFIED >>> কলাম রিসাইজিং এবং অ্যালাইনমেন্ট উন্নত করা হয়েছে
+    # <<< MODIFIED >>> 
     def _create_constraints_tab(self):
         container_widget = QWidget()
         main_layout = QVBoxLayout(container_widget)
@@ -672,6 +952,11 @@ class TablePropertiesDialog(QDialog):
                 "QHeaderView::section { background-color: #e0e0e0; padding: 4px; }")
             table_view.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
 
+            # table_view 
+            table_view.verticalHeader().setVisible(False)
+            table_view.verticalHeader().setDefaultSectionSize(26)
+            table_view.setWordWrap(False)
+
             model = QStandardItemModel()
             model.setHorizontalHeaderLabels(headers)
             table_view.setModel(model)
@@ -686,14 +971,34 @@ class TablePropertiesDialog(QDialog):
                     if item:
                         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
+               # Header align + look
+            table_view.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            
+            for row in range(model.rowCount()):
+                for col in range(model.columnCount()):
+                    item = model.item(row, col)
+                    if not item:
+                        continue
+                    if col == 0:  # Name
+                        item.setTextAlignment(
+                            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+                    else:      
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
             # Set resize modes for better display
             header = table_view.horizontalHeader()
             for col in range(model.columnCount()):
                 header.setSectionResizeMode(
                     col, QHeaderView.ResizeMode.Interactive)
+            # if model.columnCount() > 0:
+            #     header.setSectionResizeMode(
+            #         model.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
+
             if model.columnCount() > 0:
-                header.setSectionResizeMode(
-                    model.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
+                for c in range(model.columnCount()):
+                    header.setSectionResizeMode(
+                        c, QHeaderView.ResizeMode.Stretch)
 
             constraints_tab_widget.addTab(table_view, title)
         return container_widget
@@ -1020,6 +1325,7 @@ class MainWindow(QMainWindow):
         self._create_actions()
         self._create_menu()
         self._create_centered_toolbar()
+        self._initialize_processes_model() # <<< MODIFIED >>> Initialize shared model
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(self.main_splitter)
         self.status = QStatusBar()
@@ -1059,7 +1365,6 @@ class MainWindow(QMainWindow):
         add_tab_btn.clicked.connect(self.add_tab)
         self.tab_widget.setCornerWidget(add_tab_btn)
         self.main_splitter.addWidget(self.tab_widget)
-        self.processes_tab = None
         self.thread_monitor_timer = QTimer()
         self.thread_monitor_timer.timeout.connect(
             self.update_thread_pool_status)
@@ -1070,34 +1375,11 @@ class MainWindow(QMainWindow):
         self.notification_manager = NotificationManager(self)
         self._apply_styles()
 
-    def _create_processes_tab(self):
-        if self.processes_tab is not None:
-            return
-        self.processes_tab = QWidget()
-        self.processes_tab.setObjectName("ProcessesTab")
-        layout = QVBoxLayout(self.processes_tab)
-        layout.setContentsMargins(5, 5, 5, 5)
-        self.processes_view = QTableView()
-        self.processes_view.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.processes_view.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows)
-        self.processes_view.setAlternatingRowColors(True)
-        self.processes_view.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.processes_view)
+    # <<< MODIFIED >>> This now only creates the central data model for processes.
+    def _initialize_processes_model(self):
         self.processes_model = QStandardItemModel()
         self.processes_model.setHorizontalHeaderLabels(
             ["PID", "Type", "Status", "Server", "Object", "Time Taken (sec)", "Start Time", "Details"])
-        self.processes_view.setModel(self.processes_model)
-        self.processes_view.setColumnWidth(0, 150)
-        self.processes_view.setColumnWidth(1, 100)
-        self.processes_view.setColumnWidth(2, 100)
-        self.processes_view.setColumnWidth(3, 150)
-        self.processes_view.setColumnWidth(4, 150)
-        self.processes_view.setColumnWidth(5, 120)
-        self.processes_view.setColumnWidth(6, 150)
-        self.tab_widget.addTab(self.processes_tab, QIcon(
-            "assets/process_icon.png"), "Processes")
 
     def _create_actions(self):
         self.exit_action = QAction(QIcon("assets/exit_icon.png"), "Exit", self)
@@ -1197,11 +1479,11 @@ class MainWindow(QMainWindow):
 
     def _get_current_editor(self):
         current_tab = self.tab_widget.currentWidget()
-        if not current_tab or (self.processes_tab and current_tab == self.processes_tab):
+        if not current_tab:
             return None
         editor_stack = current_tab.findChild(QStackedWidget, "editor_stack")
         if editor_stack and editor_stack.currentIndex() == 0:
-            return current_tab.findChild(QTextEdit, "query_editor")
+            return current_tab.findChild(CodeEditor, "query_editor")
         return None
 
     def undo_text(self):
@@ -1238,7 +1520,7 @@ class MainWindow(QMainWindow):
         self.main_splitter.setSizes([280, 920])
         self.left_vertical_splitter.setSizes([240, 360])
         current_tab = self.tab_widget.currentWidget()
-        if current_tab and (not self.processes_tab or current_tab != self.processes_tab):
+        if current_tab:
             tab_splitter = current_tab.findChild(
                 QSplitter, "tab_vertical_splitter")
             if tab_splitter:
@@ -1263,12 +1545,12 @@ class MainWindow(QMainWindow):
     def update_thread_pool_status(self):
         self.status.showMessage(
             f"ThreadPool: {self.thread_pool.activeThreadCount()} active of {self.thread_pool.maxThreadCount()}", 3000)
-
+        
     def _apply_styles(self):
         primary_color, header_color, selection_color = "#D3D3D3", "#A9A9A9", "#A9A9A9"
         text_color_on_primary, alternate_row_color, border_color = "#000000", "#f0f0f0", "#A9A9A9"
-        self.setStyleSheet(f"""QMainWindow, QToolBar, QStatusBar {{ background-color: {primary_color}; color: {text_color_on_primary}; }} QTreeView {{ background-color: white; alternate-background-color: {alternate_row_color}; border: 1px solid {border_color}; }} QTableView {{ alternate-background-color: {alternate_row_color}; background-color: white; gridline-color: #d0d0d0; border: 1px solid {border_color}; font-family: Arial, sans-serif; font-size: 9pt; }} QTableView::item {{ padding: 4px; }} QTableView::item:selected {{ background-color: {selection_color}; color: white; }} QHeaderView::section {{ background-color: {header_color}; color: white; padding: 6px; border: 1px solid {border_color}; font-weight: bold; font-size: 9pt; }} QTableView QTableCornerButton::section {{ background-color: {header_color}; border: 1px solid {border_color}; }} #resultsHeader QPushButton, #editorHeader QPushButton {{ background-color: #ffffff; border: 1px solid {border_color}; padding: 5px 15px; font-size: 9pt; }} #resultsHeader QPushButton:hover, #editorHeader QPushButton:hover {{ background-color: {primary_color}; }} #resultsHeader QPushButton:checked, #editorHeader QPushButton:checked {{ background-color: {selection_color}; border-bottom: 1px solid {selection_color}; font-weight: bold; color: white; }} #resultsHeader, #editorHeader {{ background-color: {alternate_row_color}; padding-bottom: -1px; }} #messageView, #history_details_view, QTextEdit {{ font-family: Consolas, monospace; font-size: 10pt; background-color: white; border: 1px solid {border_color}; }} #tab_status_label {{ padding: 3px 5px; background-color: {alternate_row_color}; border-top: 1px solid {border_color}; }} QGroupBox {{ font-size: 9pt; font-weight: bold; color: {text_color_on_primary}; }} QTabWidget::pane {{ border-top: 1px solid {border_color}; }} QTabBar::tab {{ background: #E0E0E0; border: 1px solid {border_color}; padding: 5px 10px; border-bottom: none; }} QTabBar::tab:selected {{ background: {selection_color}; color: white; }} QComboBox {{ border: 1px solid {border_color}; padding: 2px; background-color: white; }}""")
-
+        self.setStyleSheet(f"""QMainWindow, QToolBar, QStatusBar {{ background-color: {primary_color}; color: {text_color_on_primary}; }} QTreeView {{ background-color: white; alternate-background-color: {alternate_row_color}; border: 1px solid {border_color}; }} QTableView {{ alternate-background-color: {alternate_row_color}; background-color: white; gridline-color: #a9a9a9; border: 1px solid {border_color}; font-family: Arial, sans-serif; font-size: 9pt;}} QTableView::item {{ padding: 4px; }} QTableView::item:selected {{ background-color: {selection_color}; color: white; }} QHeaderView::section {{ background-color: {header_color}; color: white; padding: 4px; border: none; border-right: 1px solid #d3d3d3; border-bottom: 1px solid {border_color}; font-weight: bold; font-size: 9pt;  }} QTableView QTableCornerButton::section {{ background-color: {header_color}; border: 1px solid {border_color}; }} #resultsHeader QPushButton, #editorHeader QPushButton {{ background-color: #ffffff; border: 1px solid {border_color}; padding: 5px 15px; font-size: 9pt; }} #resultsHeader QPushButton:hover, #editorHeader QPushButton:hover {{ background-color: {primary_color}; }} #resultsHeader QPushButton:checked, #editorHeader QPushButton:checked {{ background-color: {selection_color}; border-bottom: 1px solid {selection_color}; font-weight: bold; color: white; }} #resultsHeader, #editorHeader {{ background-color: {alternate_row_color}; padding-bottom: -1px; }} #messageView, #history_details_view, QTextEdit {{ font-family: Consolas, monospace; font-size: 10pt; background-color: white; border: 1px solid {border_color}; }} #tab_status_label {{ padding: 3px 5px; background-color: {alternate_row_color}; border-top: 1px solid {border_color}; }} QGroupBox {{ font-size: 9pt; font-weight: bold; color: {text_color_on_primary}; }} QTabWidget::pane {{ border-top: 1px solid {border_color}; }} QTabBar::tab {{ background: #E0E0E0; border: 1px solid {border_color}; padding: 5px 10px; border-bottom: none; }} QTabBar::tab:selected {{ background: {selection_color}; color: white; }} QComboBox {{ border: 1px solid {border_color}; padding: 2px; background-color: white; }}""")
+    # <<< MODIFIED >>> The main tab creation logic is heavily updated here
     def add_tab(self):
         tab_content = QWidget()
         layout = QVBoxLayout(tab_content)
@@ -1292,8 +1574,10 @@ class MainWindow(QMainWindow):
         editor_header_layout.setSpacing(2)
         query_view_btn, history_view_btn = QPushButton(
             "Query"), QPushButton("Query History")
+        history_view_btn.setMinimumWidth(120)
         query_view_btn.setCheckable(True)
         history_view_btn.setCheckable(True)
+        
         query_view_btn.setChecked(True)
         editor_header_layout.addWidget(query_view_btn)
         editor_header_layout.addWidget(history_view_btn)
@@ -1301,9 +1585,11 @@ class MainWindow(QMainWindow):
         editor_layout.addWidget(editor_header)
         editor_stack = QStackedWidget()
         editor_stack.setObjectName("editor_stack")
-        text_edit = QTextEdit()
+
+        text_edit = CodeEditor()
         text_edit.setPlaceholderText("Write Query")
         text_edit.setObjectName("query_editor")
+
         editor_stack.addWidget(text_edit)
         history_widget = QSplitter(Qt.Orientation.Horizontal)
         history_list_view = QTreeView()
@@ -1353,6 +1639,8 @@ class MainWindow(QMainWindow):
             lambda: self.remove_selected_history(tab_content))
         remove_all_history_btn.clicked.connect(
             lambda: self.remove_all_history_for_connection(tab_content))
+        
+        # --- Results Container ---
         results_container = QWidget()
         results_layout = QVBoxLayout(results_container)
         results_layout.setContentsMargins(0, 5, 0, 0)
@@ -1362,30 +1650,64 @@ class MainWindow(QMainWindow):
         header_layout = QHBoxLayout(results_header)
         header_layout.setContentsMargins(5, 2, 5, 0)
         header_layout.setSpacing(2)
-        output_btn, message_btn, notification_btn = QPushButton(
-            "Output"), QPushButton("Message"), QPushButton("Notification")
+        
+        # <<< MODIFIED >>> Add "Processes" button
+        output_btn, message_btn, notification_btn, processes_btn = QPushButton(
+            "Output"), QPushButton("Messages"), QPushButton("Notifications"), QPushButton("Processes")
+        
         output_btn.setCheckable(True)
         message_btn.setCheckable(True)
         notification_btn.setCheckable(True)
+        processes_btn.setCheckable(True)
         output_btn.setChecked(True)
+        
         header_layout.addWidget(output_btn)
         header_layout.addWidget(message_btn)
         header_layout.addWidget(notification_btn)
+        header_layout.addWidget(processes_btn) # <<< MODIFIED >>> Add button to layout
         header_layout.addStretch()
         results_layout.addWidget(results_header)
+        
         results_stack = QStackedWidget()
         results_stack.setObjectName("results_stacked_widget")
+        
+        # Page 0: Output Table
         table_view = QTableView()
         table_view.setObjectName("result_table")
         table_view.setAlternatingRowColors(True)
         results_stack.addWidget(table_view)
+        table_view.verticalHeader().setVisible(False)
+        table_view.verticalHeader().setDefaultSectionSize(28)
+
+        # Page 1: Message View
         message_view = QTextEdit()
         message_view.setObjectName("message_view")
         message_view.setReadOnly(True)
         results_stack.addWidget(message_view)
+        
+        # Page 2: Notification View
         notification_view = QLabel("Notifications will appear here.")
         notification_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         results_stack.addWidget(notification_view)
+        
+        # <<< MODIFIED >>> Page 3: Processes View
+        processes_view = QTableView()
+        processes_view.setObjectName("processes_view")
+        processes_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        processes_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        processes_view.setAlternatingRowColors(True)
+        processes_view.horizontalHeader().setStretchLastSection(True)
+        processes_view.setModel(self.processes_model) # Use the shared model
+        processes_view.setColumnWidth(0, 150)
+        processes_view.setColumnWidth(1, 100)
+        processes_view.setColumnWidth(2, 100)
+        processes_view.setColumnWidth(3, 150)
+        processes_view.setColumnWidth(4, 150)
+        processes_view.setColumnWidth(5, 120)
+        processes_view.setColumnWidth(6, 150)
+        results_stack.addWidget(processes_view)
+
+        # Page 4: Spinner Overlay
         spinner_overlay_widget = QWidget()
         spinner_layout = QHBoxLayout(spinner_overlay_widget)
         spinner_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1406,29 +1728,33 @@ class MainWindow(QMainWindow):
         spinner_layout.addWidget(loading_text_label)
         results_stack.addWidget(spinner_overlay_widget)
         results_layout.addWidget(results_stack)
+        
         tab_status_label = QLabel("Ready")
         tab_status_label.setObjectName("tab_status_label")
         results_layout.addWidget(tab_status_label)
-        button_group = [output_btn, message_btn, notification_btn]
+        
+        # <<< MODIFIED >>> Update button group and view switching logic
+        button_group = [output_btn, message_btn, notification_btn, processes_btn]
 
         def switch_results_view(index):
-            if results_stack.currentIndex() != 3:
+            # Block switching if a query is running (spinner is visible at index 4)
+            if results_stack.currentIndex() != 4:
                 results_stack.setCurrentIndex(index)
                 for i, btn in enumerate(button_group):
                     btn.setChecked(i == index)
+        
         output_btn.clicked.connect(lambda: switch_results_view(0))
         message_btn.clicked.connect(lambda: switch_results_view(1))
         notification_btn.clicked.connect(lambda: switch_results_view(2))
+        processes_btn.clicked.connect(lambda: switch_results_view(3))
+
         main_vertical_splitter.addWidget(results_container)
         main_vertical_splitter.setSizes([300, 300])
         tab_content.setLayout(layout)
-        insert_index = self.tab_widget.count()
-        if self.processes_tab:
-            insert_index = self.tab_widget.indexOf(self.processes_tab)
-        worksheet_count = sum(1 for i in range(self.tab_widget.count()) if not (
-            self.processes_tab and self.tab_widget.widget(i) == self.processes_tab))
+        
+        worksheet_count = self.tab_widget.count()
         index = self.tab_widget.insertTab(
-            insert_index, tab_content, f"Worksheet {worksheet_count + 1}")
+            worksheet_count, tab_content, f"Worksheet {worksheet_count + 1}")
         self.tab_widget.setCurrentIndex(index)
         return tab_content
 
@@ -1473,14 +1799,15 @@ class MainWindow(QMainWindow):
                 self, "Export Error", f"An error occurred while exporting the data:\n{e}")
             self.status_message_label.setText("Export failed.")
 
+    # <<< MODIFIED >>> Simplified tab closing logic
     def close_tab(self, index):
+        # Prevent closing the last "Worksheet" tab
         if self.tab_widget.count() <= 1:
             QMessageBox.information(
-                self, "Cannot Close", "At least one tab must remain open.")
+                self, "Cannot Close", "At least one worksheet tab must remain open.")
             return
+        
         tab_to_close = self.tab_widget.widget(index)
-        if tab_to_close == self.processes_tab:
-            self.processes_tab = None
         if tab_to_close in self.running_queries:
             self.running_queries[tab_to_close].cancel()
             del self.running_queries[tab_to_close]
@@ -1491,29 +1818,30 @@ class MainWindow(QMainWindow):
             if "timeout_timer" in self.tab_timers[tab_to_close]:
                 self.tab_timers[tab_to_close]["timeout_timer"].stop()
             del self.tab_timers[tab_to_close]
+            
         self.tab_widget.removeTab(index)
         self.renumber_tabs()
 
+    # <<< MODIFIED >>> Simplified tab renumbering
     def renumber_tabs(self):
-        worksheet_counter = 1
         for i in range(self.tab_widget.count()):
-            tab = self.tab_widget.widget(i)
-            if not (self.processes_tab and tab == self.processes_tab):
-                self.tab_widget.setTabText(i, f"Worksheet {worksheet_counter}")
-                worksheet_counter += 1
+            self.tab_widget.setTabText(i, f"Worksheet {i + 1}")
 
     def load_data(self):
         self.model.clear()
         self.model.setHorizontalHeaderLabels(["Object Explorer"])
         for cat_data in db.get_hierarchy_data():
             cat_item = QStandardItem(cat_data['name'])
+            cat_item.setEditable(False)
             cat_item.setData(cat_data['id'], Qt.ItemDataRole.UserRole + 1)
             for subcat_data in cat_data['subcategories']:
                 subcat_item = QStandardItem(subcat_data['name'])
+                subcat_item.setEditable(False)
                 subcat_item.setData(
                     subcat_data['id'], Qt.ItemDataRole.UserRole + 1)
                 for item_data in subcat_data['items']:
                     item_item = QStandardItem(item_data['name'])
+                    item_item.setEditable(False)
                     item_item.setData(item_data, Qt.ItemDataRole.UserRole)
                     subcat_item.appendRow(item_item)
                 cat_item.appendRow(subcat_item)
@@ -1608,19 +1936,45 @@ class MainWindow(QMainWindow):
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def show_connection_details(self, item):
-        conn_data = item.data(Qt.ItemDataRole.UserRole)
-        if not conn_data:
-            QMessageBox.warning(
-                self, "Error", "Could not retrieve connection data.")
-            return
-        details_title = f"Connection Details: {conn_data.get('name')}"
-        if conn_data.get("host"):
-            details_text = f"<b>Name:</b> {conn_data.get('name', 'N/A')}<br><b>Type:</b> PostgreSQL<br><b>Host:</b> {conn_data.get('host', 'N/A')}<br><b>Port:</b> {conn_data.get('port', 'N/A')}<br><b>Database:</b> {conn_data.get('database', 'N/A')}<br><b>User:</b> {conn_data.get('user', 'N/A')}"
-        elif conn_data.get("db_path"):
-            details_text = f"<b>Name:</b> {conn_data.get('name', 'N/A')}<br><b>Type:</b> SQLite<br><b>Database Path:</b> {conn_data.get('db_path', 'N/A')}"
-        else:
-            details_text = "Could not determine connection type or details."
-        QMessageBox.information(self, details_title, details_text)
+      conn_data = item.data(Qt.ItemDataRole.UserRole)
+      if not conn_data:
+          QMessageBox.warning(self, "Error", "Could not retrieve connection data.")
+          return
+
+      details_title = f"Connection Details: {conn_data.get('name')}"
+
+      if conn_data.get("host"):  # PostgreSQL
+          details_text = (
+              f"<b>Name:</b> {conn_data.get('name', 'N/A')}<br>"
+              f"<b>Type:</b> PostgreSQL<br>"
+              f"<b>Host:</b> {conn_data.get('host', 'N/A')}<br>"
+              f"<b>Port:</b> {conn_data.get('port', 'N/A')}<br>"
+              f"<b>Database:</b> {conn_data.get('database', 'N/A')}<br>"
+              f"<b>User:</b> {conn_data.get('user', 'N/A')}"
+          )
+      elif conn_data.get("db_path"):  # SQLite
+          details_text = (
+              f"<b>Name:</b> {conn_data.get('name', 'N/A')}<br>"
+              f"<b>Type:</b> SQLite<br>"
+              f"<b>Database Path:</b> {conn_data.get('db_path', 'N/A')}"
+          )
+      else:
+          details_text = "Could not determine connection type or details."
+
+      msg = QMessageBox(self)
+      msg.setWindowTitle(details_title)
+      msg.setIcon(QMessageBox.Icon.Information)
+      msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+
+      # custom QLabel for fixed size
+      label = QLabel(details_text)
+      label.setTextFormat(Qt.TextFormat.RichText)
+      label.setWordWrap(True)
+      label.setMinimumSize(400, 200)   # force medium size
+      msg.layout().addWidget(label, 0, 1)  # replace default text widget
+
+      msg.exec()
+
 
     def add_subcategory(self, parent_item):
         name, ok = QInputDialog.getText(self, "New Group", "Group name:")
@@ -1702,10 +2056,9 @@ class MainWindow(QMainWindow):
     def refresh_all_comboboxes(self):
         for i in range(self.tab_widget.count()):
             tab = self.tab_widget.widget(i)
-            if not (self.processes_tab and tab == self.processes_tab):
-                combo_box = tab.findChild(QComboBox, "db_combo_box")
-                if combo_box:
-                    self.load_joined_items(combo_box)
+            combo_box = tab.findChild(QComboBox, "db_combo_box")
+            if combo_box:
+                self.load_joined_items(combo_box)
 
     def load_joined_items(self, combo_box):
         try:
@@ -1736,7 +2089,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Query in Progress",
                                 "A query is already running in this tab.")
             return
-        query_editor = current_tab.findChild(QTextEdit, "query_editor")
+        query_editor = current_tab.findChild(CodeEditor, "query_editor")
         db_combo_box = current_tab.findChild(QComboBox, "db_combo_box")
         conn_data, query = db_combo_box.currentData(), query_editor.toPlainText().strip()
         if not conn_data or not query:
@@ -1745,7 +2098,7 @@ class MainWindow(QMainWindow):
         results_stack = current_tab.findChild(
             QStackedWidget, "results_stacked_widget")
         spinner_label = results_stack.findChild(QLabel, "spinner_label")
-        results_stack.setCurrentIndex(3)
+        results_stack.setCurrentIndex(4) # <<< MODIFIED >>> Spinner is now at index 4
         if spinner_label and spinner_label.movie():
             spinner_label.movie().start()
         tab_status_label = current_tab.findChild(QLabel, "tab_status_label")
@@ -1819,12 +2172,14 @@ class MainWindow(QMainWindow):
                     buttons[0].setChecked(True)
                     buttons[1].setChecked(False)
                     buttons[2].setChecked(False)
+                    buttons[3].setChecked(False) # <<< MODIFIED >>> Uncheck processes button
             else:
                 stacked_widget.setCurrentIndex(1)
                 if buttons:
                     buttons[0].setChecked(False)
                     buttons[1].setChecked(True)
                     buttons[2].setChecked(False)
+                    buttons[3].setChecked(False) # <<< MODIFIED >>> Uncheck processes button
 
     def handle_query_result(self, target_tab, conn_data, query, results, columns, row_count, elapsed_time, is_select_query):
         if target_tab in self.tab_timers:
@@ -1939,7 +2294,7 @@ class MainWindow(QMainWindow):
     def copy_history_to_editor(self, target_tab):
         history_data = self._get_selected_history_item(target_tab)
         if history_data:
-            target_tab.findChild(QTextEdit, "query_editor").setPlainText(
+            target_tab.findChild(CodeEditor, "query_editor").setPlainText(
                 history_data['query'])
             target_tab.findChild(
                 QStackedWidget, "editor_stack").setCurrentIndex(0)
@@ -1981,22 +2336,18 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(
                     self, "Error", f"Failed to clear history for this connection:\n{e}")
+                
 
     def load_sqlite_schema(self, conn_data):
         self.schema_model.clear()
         self.schema_model.setHorizontalHeaderLabels(["Name", "Type"])
-        self.schema_tree.setColumnWidth(0, 200)  
-        self.schema_tree.setColumnWidth(1, 100) 
+        self.schema_tree.setColumnWidth(0, 200)
+        self.schema_tree.setColumnWidth(1, 100)
+        
         header = self.schema_tree.header()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(False)
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-        header = self.schema_tree.header()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-
-
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft)
         self.schema_tree.setStyleSheet("""
     QHeaderView {
         background-color: #a9a9a9;
@@ -2011,7 +2362,6 @@ class MainWindow(QMainWindow):
         gridline-color: #a9a9a9;
     }
 """)
-
 
         db_path = conn_data.get("db_path")
         if not db_path or not os.path.exists(db_path):
@@ -2042,9 +2392,10 @@ class MainWindow(QMainWindow):
                     pass
         except Exception as e:
             self.status.showMessage(f"Error loading SQLite schema: {e}", 5000)
-        
+
     def load_postgres_schema(self, conn_data):
         try:
+            
             self.schema_model.clear()
             self.schema_model.setHorizontalHeaderLabels(["Name", "Type"])
             self.pg_conn = psycopg2.connect(host=conn_data["host"], database=conn_data["database"],
@@ -2074,14 +2425,12 @@ class MainWindow(QMainWindow):
             self.status.showMessage(f"Error loading schemas: {e}", 5000)
             if hasattr(self, 'pg_conn') and self.pg_conn:
                 self.pg_conn.close()
-        self.schema_tree.setColumnWidth(0, 200)  
-        self.schema_tree.setColumnWidth(1,100) 
+        self.schema_tree.setColumnWidth(0, 200)
+        self.schema_tree.setColumnWidth(1, 100)
         header = self.schema_tree.header()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-
-
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft)
         self.schema_tree.setStyleSheet("""
     QHeaderView {
         background-color: #a9a9a9;
@@ -2096,9 +2445,7 @@ class MainWindow(QMainWindow):
         gridline-color: #a9a9a9;
     }
 """)
-
-
-
+    
     def show_schema_context_menu(self, position):
         index = self.schema_tree.indexAt(position)
         if not index.isValid():
@@ -2146,6 +2493,7 @@ class MainWindow(QMainWindow):
         dialog = TablePropertiesDialog(item_data, table_name, self)
         dialog.exec()
 
+    # <<< MODIFIED >>> Logic to start an export process
     def export_schema_table_rows(self, item_data, table_name):
         if not item_data:
             return
@@ -2153,12 +2501,13 @@ class MainWindow(QMainWindow):
             self, f"{table_name}_{datetime.datetime.now().strftime('%Y%m%d')}.csv")
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        self._create_processes_tab()
+        
         options = dialog.get_options()
         if not options['filename']:
             QMessageBox.warning(self, "No Filename",
                                 "Export cancelled. No filename specified.")
             return
+            
         process_id = str(uuid.uuid4())
         conn_data = item_data['conn_data']
         object_name = f"{item_data.get('schema_name', 'public')}.{table_name}"
@@ -2172,9 +2521,26 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(RunnableExport(
             process_id, item_data, table_name, options, signals))
 
+    # <<< MODIFIED >>> Helper to switch the current tab's results view
+    def switch_to_processes_view(self):
+        current_tab = self.tab_widget.currentWidget()
+        if not current_tab:
+            return
+
+        results_stack = current_tab.findChild(QStackedWidget, "results_stacked_widget")
+        header = current_tab.findChild(QWidget, "resultsHeader")
+        buttons = header.findChildren(QPushButton)
+        
+        if results_stack and len(buttons) >= 4:
+            # Index 3 is the Processes view
+            results_stack.setCurrentIndex(3)
+            buttons[0].setChecked(False)
+            buttons[1].setChecked(False)
+            buttons[2].setChecked(False)
+            buttons[3].setChecked(True)
+
     def handle_process_started(self, process_id, data):
-        if self.processes_tab:
-            self.tab_widget.setCurrentWidget(self.processes_tab)
+        self.switch_to_processes_view()
         row_items = []
         for key in ["pid", "type", "status", "server", "object", "time_taken", "start_time", "details"]:
             item = QStandardItem(data[key])
@@ -2258,10 +2624,19 @@ class MainWindow(QMainWindow):
         query = f'SELECT * FROM "{item_data.get("schema_name")}"."{table_name}"' if item_data.get(
             'db_type') == 'postgres' else f'SELECT * FROM "{table_name}"'
         if order:
-            query += f" ORDER BY 1 {order.upper()}"
+            # A simple way to get a column for ordering. Might not be perfect for all cases.
+            if item_data.get('db_type') == 'postgres':
+                # This is a bit of a hack without fetching column names first.
+                # It assumes there's a primary key or a first column to order by.
+                query += f" ORDER BY 1 {order.upper()}"
+            else:  # SQLite
+                query += f" ORDER BY 1 {order.upper()}"
+
         if limit:
             query += f" LIMIT {limit}"
-        new_tab.findChild(QTextEdit, "query_editor").setPlainText(query)
+
+        new_tab.findChild(CodeEditor, "query_editor").setPlainText(query)
+
         if execute_now:
             self.tab_widget.setCurrentWidget(new_tab)
             self.execute_query()
