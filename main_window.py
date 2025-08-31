@@ -1550,7 +1550,7 @@ class MainWindow(QMainWindow):
         primary_color, header_color, selection_color = "#D3D3D3", "#A9A9A9", "#A9A9A9"
         text_color_on_primary, alternate_row_color, border_color = "#000000", "#f0f0f0", "#A9A9A9"
         self.setStyleSheet(f"""QMainWindow, QToolBar, QStatusBar {{ background-color: {primary_color}; color: {text_color_on_primary}; }} QTreeView {{ background-color: white; alternate-background-color: {alternate_row_color}; border: 1px solid {border_color}; }} QTableView {{ alternate-background-color: {alternate_row_color}; background-color: white; gridline-color: #a9a9a9; border: 1px solid {border_color}; font-family: Arial, sans-serif; font-size: 9pt;}} QTableView::item {{ padding: 4px; }} QTableView::item:selected {{ background-color: {selection_color}; color: white; }} QHeaderView::section {{ background-color: {header_color}; color: white; padding: 4px; border: none; border-right: 1px solid #d3d3d3; border-bottom: 1px solid {border_color}; font-weight: bold; font-size: 9pt;  }} QTableView QTableCornerButton::section {{ background-color: {header_color}; border: 1px solid {border_color}; }} #resultsHeader QPushButton, #editorHeader QPushButton {{ background-color: #ffffff; border: 1px solid {border_color}; padding: 5px 15px; font-size: 9pt; }} #resultsHeader QPushButton:hover, #editorHeader QPushButton:hover {{ background-color: {primary_color}; }} #resultsHeader QPushButton:checked, #editorHeader QPushButton:checked {{ background-color: {selection_color}; border-bottom: 1px solid {selection_color}; font-weight: bold; color: white; }} #resultsHeader, #editorHeader {{ background-color: {alternate_row_color}; padding-bottom: -1px; }} #messageView, #history_details_view, QTextEdit {{ font-family: Consolas, monospace; font-size: 10pt; background-color: white; border: 1px solid {border_color}; }} #tab_status_label {{ padding: 3px 5px; background-color: {alternate_row_color}; border-top: 1px solid {border_color}; }} QGroupBox {{ font-size: 9pt; font-weight: bold; color: {text_color_on_primary}; }} QTabWidget::pane {{ border-top: 1px solid {border_color}; }} QTabBar::tab {{ background: #E0E0E0; border: 1px solid {border_color}; padding: 5px 10px; border-bottom: none; }} QTabBar::tab:selected {{ background: {selection_color}; color: white; }} QComboBox {{ border: 1px solid {border_color}; padding: 2px; background-color: white; }}""")
-    # <<< MODIFIED >>> The main tab creation logic is heavily updated here
+    
     def add_tab(self):
         tab_content = QWidget()
         layout = QVBoxLayout(tab_content)
@@ -1638,7 +1638,6 @@ class MainWindow(QMainWindow):
         remove_all_history_btn.clicked.connect(
             lambda: self.remove_all_history_for_connection(tab_content))
         
-        # --- Results Container ---
         results_container = QWidget()
         results_layout = QVBoxLayout(results_container)
         results_layout.setContentsMargins(0, 5, 0, 0)
@@ -1649,9 +1648,8 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(5, 2, 5, 0)
         header_layout.setSpacing(2)
         
-        # <<< MODIFIED >>> Add "Processes" button
         output_btn, message_btn, notification_btn, processes_btn = QPushButton(
-            "Output"), QPushButton("Message"), QPushButton("Notification"), QPushButton("Processes")
+            "Data Output"), QPushButton("Messages"), QPushButton("Notifications"), QPushButton("Processes")
         
         output_btn.setCheckable(True)
         message_btn.setCheckable(True)
@@ -1662,14 +1660,18 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(output_btn)
         header_layout.addWidget(message_btn)
         header_layout.addWidget(notification_btn)
-        header_layout.addWidget(processes_btn) # <<< MODIFIED >>> Add button to layout
+        header_layout.addWidget(processes_btn)
+        
+        export_btn = QPushButton("Export Results")
+        export_btn.clicked.connect(self.export_current_results)
+        header_layout.addWidget(export_btn)
+
         header_layout.addStretch()
         results_layout.addWidget(results_header)
         
         results_stack = QStackedWidget()
         results_stack.setObjectName("results_stacked_widget")
         
-        # Page 0: Output Table
         table_view = QTableView()
         table_view.setObjectName("result_table")
         table_view.setAlternatingRowColors(True)
@@ -1677,25 +1679,22 @@ class MainWindow(QMainWindow):
         table_view.verticalHeader().setVisible(False)
         table_view.verticalHeader().setDefaultSectionSize(28)
 
-        # Page 1: Message View
         message_view = QTextEdit()
         message_view.setObjectName("message_view")
         message_view.setReadOnly(True)
         results_stack.addWidget(message_view)
         
-        # Page 2: Notification View
         notification_view = QLabel("Notifications will appear here.")
         notification_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         results_stack.addWidget(notification_view)
         
-        # <<< MODIFIED >>> Page 3: Processes View
         processes_view = QTableView()
         processes_view.setObjectName("processes_view")
         processes_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         processes_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         processes_view.setAlternatingRowColors(True)
         processes_view.horizontalHeader().setStretchLastSection(True)
-        processes_view.setModel(self.processes_model) # Use the shared model
+        processes_view.setModel(self.processes_model)
         processes_view.setColumnWidth(0, 150)
         processes_view.setColumnWidth(1, 100)
         processes_view.setColumnWidth(2, 100)
@@ -1705,7 +1704,6 @@ class MainWindow(QMainWindow):
         processes_view.setColumnWidth(6, 150)
         results_stack.addWidget(processes_view)
 
-        # Page 4: Spinner Overlay
         spinner_overlay_widget = QWidget()
         spinner_layout = QHBoxLayout(spinner_overlay_widget)
         spinner_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1731,11 +1729,9 @@ class MainWindow(QMainWindow):
         tab_status_label.setObjectName("tab_status_label")
         results_layout.addWidget(tab_status_label)
         
-        # <<< MODIFIED >>> Update button group and view switching logic
         button_group = [output_btn, message_btn, notification_btn, processes_btn]
 
         def switch_results_view(index):
-            # Block switching if a query is running (spinner is visible at index 4)
             if results_stack.currentIndex() != 4:
                 results_stack.setCurrentIndex(index)
                 for i, btn in enumerate(button_group):
@@ -1797,9 +1793,7 @@ class MainWindow(QMainWindow):
                 self, "Export Error", f"An error occurred while exporting the data:\n{e}")
             self.status_message_label.setText("Export failed.")
 
-    # <<< MODIFIED >>> Simplified tab closing logic
     def close_tab(self, index):
-        # Prevent closing the last "Worksheet" tab
         if self.tab_widget.count() <= 1:
             QMessageBox.information(
                 self, "Cannot Close", "At least one worksheet tab must remain open.")
@@ -1820,7 +1814,6 @@ class MainWindow(QMainWindow):
         self.tab_widget.removeTab(index)
         self.renumber_tabs()
 
-    # <<< MODIFIED >>> Simplified tab renumbering
     def renumber_tabs(self):
         for i in range(self.tab_widget.count()):
             self.tab_widget.setTabText(i, f"Worksheet {i + 1}")
@@ -1938,7 +1931,7 @@ class MainWindow(QMainWindow):
 
       details_title = f"Connection Details: {conn_data.get('name')}"
 
-      if conn_data.get("host"):  # PostgreSQL
+      if conn_data.get("host"):
           details_text = (
               f"<b>Name:</b> {conn_data.get('name', 'N/A')}<br>"
               f"<b>Type:</b> PostgreSQL<br>"
@@ -1947,7 +1940,7 @@ class MainWindow(QMainWindow):
               f"<b>Database:</b> {conn_data.get('database', 'N/A')}<br>"
               f"<b>User:</b> {conn_data.get('user', 'N/A')}"
           )
-      elif conn_data.get("db_path"):  # SQLite
+      elif conn_data.get("db_path"):
           details_text = (
               f"<b>Name:</b> {conn_data.get('name', 'N/A')}<br>"
               f"<b>Type:</b> SQLite<br>"
@@ -1961,12 +1954,11 @@ class MainWindow(QMainWindow):
       msg.setIcon(QMessageBox.Icon.Information)
       msg.setStandardButtons(QMessageBox.StandardButton.Ok)
 
-      # custom QLabel for fixed size
       label = QLabel(details_text)
       label.setTextFormat(Qt.TextFormat.RichText)
       label.setWordWrap(True)
-      label.setMinimumSize(400, 200)   # force medium size
-      msg.layout().addWidget(label, 0, 1)  # replace default text widget
+      label.setMinimumSize(400, 200)
+      msg.layout().addWidget(label, 0, 1)
 
       msg.exec()
 
@@ -2093,7 +2085,7 @@ class MainWindow(QMainWindow):
         results_stack = current_tab.findChild(
             QStackedWidget, "results_stacked_widget")
         spinner_label = results_stack.findChild(QLabel, "spinner_label")
-        results_stack.setCurrentIndex(4) # <<< MODIFIED >>> Spinner is now at index 4
+        results_stack.setCurrentIndex(4)
         if spinner_label and spinner_label.movie():
             spinner_label.movie().start()
         tab_status_label = current_tab.findChild(QLabel, "tab_status_label")
@@ -2167,14 +2159,14 @@ class MainWindow(QMainWindow):
                     buttons[0].setChecked(True)
                     buttons[1].setChecked(False)
                     buttons[2].setChecked(False)
-                    buttons[3].setChecked(False) # <<< MODIFIED >>> Uncheck processes button
+                    buttons[3].setChecked(False)
             else:
                 stacked_widget.setCurrentIndex(1)
                 if buttons:
                     buttons[0].setChecked(False)
                     buttons[1].setChecked(True)
                     buttons[2].setChecked(False)
-                    buttons[3].setChecked(False) # <<< MODIFIED >>> Uncheck processes button
+                    buttons[3].setChecked(False)
 
     def handle_query_result(self, target_tab, conn_data, query, results, columns, row_count, elapsed_time, is_select_query):
         if target_tab in self.tab_timers:
@@ -2445,7 +2437,6 @@ class MainWindow(QMainWindow):
     }
 """)
     
-
     def show_schema_context_menu(self, position):
         index = self.schema_tree.indexAt(position)
         if not index.isValid():
@@ -2478,7 +2469,7 @@ class MainWindow(QMainWindow):
         query_tool_action.triggered.connect(
             lambda: self.open_query_tool_for_table(item_data, table_name))
         menu.addAction(query_tool_action)
-        menu.addSeparator()  # Changed from view_menu
+        menu.addSeparator()
         export_rows_action = QAction("Export Rows", self)
         export_rows_action.triggered.connect(
             lambda: self.export_schema_table_rows(item_data, table_name))
@@ -2493,7 +2484,6 @@ class MainWindow(QMainWindow):
         dialog = TablePropertiesDialog(item_data, table_name, self)
         dialog.exec()
 
-    # <<< MODIFIED >>> Logic to start an export process
     def export_schema_table_rows(self, item_data, table_name):
         if not item_data:
             return
@@ -2521,7 +2511,6 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(RunnableExport(
             process_id, item_data, table_name, options, signals))
 
-    # <<< MODIFIED >>> Helper to switch the current tab's results view
     def switch_to_processes_view(self):
         current_tab = self.tab_widget.currentWidget()
         if not current_tab:
@@ -2532,7 +2521,6 @@ class MainWindow(QMainWindow):
         buttons = header.findChildren(QPushButton)
         
         if results_stack and len(buttons) >= 4:
-            # Index 3 is the Processes view
             results_stack.setCurrentIndex(3)
             buttons[0].setChecked(False)
             buttons[1].setChecked(False)
@@ -2608,8 +2596,28 @@ class MainWindow(QMainWindow):
             f"Error: {error_message}", is_error=True)
         self.status_message_label.setText("Failed to count rows.")
 
+    # <<< MODIFIED FUNCTION START >>>
     def open_query_tool_for_table(self, item_data, table_name):
-        self.query_table_rows(item_data, table_name, execute_now=False)
+        if not item_data:
+            return
+        
+        conn_data = item_data.get('conn_data')
+        
+        # Create a new blank tab
+        new_tab = self.add_tab()
+        
+        # Find the database connection dropdown in the new tab
+        db_combo_box = new_tab.findChild(QComboBox, "db_combo_box")
+        
+        # Find and set the correct connection in the dropdown
+        for i in range(db_combo_box.count()):
+            if db_combo_box.itemData(i) and db_combo_box.itemData(i).get('id') == conn_data.get('id'):
+                db_combo_box.setCurrentIndex(i)
+                break
+        
+        # Switch focus to the new tab
+        self.tab_widget.setCurrentWidget(new_tab)
+    # <<< MODIFIED FUNCTION END >>>
 
     def query_table_rows(self, item_data, table_name, limit=None, execute_now=True, order=None):
         if not item_data:
@@ -2624,12 +2632,9 @@ class MainWindow(QMainWindow):
         query = f'SELECT * FROM "{item_data.get("schema_name")}"."{table_name}"' if item_data.get(
             'db_type') == 'postgres' else f'SELECT * FROM "{table_name}"'
         if order:
-            # A simple way to get a column for ordering. Might not be perfect for all cases.
             if item_data.get('db_type') == 'postgres':
-                # This is a bit of a hack without fetching column names first.
-                # It assumes there's a primary key or a first column to order by.
                 query += f" ORDER BY 1 {order.upper()}"
-            else:  # SQLite
+            else:
                 query += f" ORDER BY 1 {order.upper()}"
 
         if limit:
