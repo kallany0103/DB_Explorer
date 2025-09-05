@@ -34,7 +34,6 @@ import dialogs.db as db
 
 # <<< NEW CLASS >>> Line number widget for the code editor
 
-
 class LineNumberArea(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
