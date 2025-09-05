@@ -1570,10 +1570,11 @@ class MainWindow(QMainWindow):
         editor_header = QWidget()
         editor_header.setObjectName("editorHeader")
         editor_header_layout = QHBoxLayout(editor_header)
-        editor_header_layout.setContentsMargins(5, 2, 5, 0)
+        editor_header_layout.setContentsMargins(0, 2, 5, 0)
         editor_header_layout.setSpacing(2)
         query_view_btn, history_view_btn = QPushButton(
             "Query"), QPushButton("Query History")
+        history_view_btn.setMinimumWidth(120)
         query_view_btn.setCheckable(True)
         history_view_btn.setCheckable(True)
         query_view_btn.setChecked(True)
@@ -1641,16 +1642,20 @@ class MainWindow(QMainWindow):
         results_container = QWidget()
         results_layout = QVBoxLayout(results_container)
         results_layout.setContentsMargins(0, 5, 0, 0)
-        results_layout.setSpacing(0)
+        results_layout.setSpacing(1)
         results_header = QWidget()
         results_header.setObjectName("resultsHeader")
         header_layout = QHBoxLayout(results_header)
-        header_layout.setContentsMargins(5, 2, 5, 0)
+        header_layout.setContentsMargins(0, 2, 5, 0)
         header_layout.setSpacing(2)
         
         output_btn, message_btn, notification_btn, processes_btn = QPushButton(
             "Data Output"), QPushButton("Messages"), QPushButton("Notifications"), QPushButton("Processes")
-        
+        output_btn.setMinimumWidth(100)
+        message_btn.setMinimumWidth(100)
+        notification_btn.setMinimumWidth(100)
+        processes_btn.setMinimumWidth(100)
+        output_btn.setMinimumWidth(100)
         output_btn.setCheckable(True)
         message_btn.setCheckable(True)
         notification_btn.setCheckable(True)
@@ -1923,13 +1928,16 @@ class MainWindow(QMainWindow):
         self.model.setHorizontalHeaderLabels(["Object Explorer"])
         for cat_data in db.get_hierarchy_data():
             cat_item = QStandardItem(cat_data['name'])
+            cat_item.setEditable(False)
             cat_item.setData(cat_data['id'], Qt.ItemDataRole.UserRole + 1)
             for subcat_data in cat_data['subcategories']:
                 subcat_item = QStandardItem(subcat_data['name'])
+                subcat_item.setEditable(False)
                 subcat_item.setData(
                     subcat_data['id'], Qt.ItemDataRole.UserRole + 1)
                 for item_data in subcat_data['items']:
                     item_item = QStandardItem(item_data['name'])
+                    item_item.setEditable(False)
                     item_item.setData(item_data, Qt.ItemDataRole.UserRole)
                     subcat_item.appendRow(item_item)
                 cat_item.appendRow(subcat_item)
@@ -2431,15 +2439,11 @@ class MainWindow(QMainWindow):
         self.schema_model.setHorizontalHeaderLabels(["Name", "Type"])
         self.schema_tree.setColumnWidth(0, 200)
         self.schema_tree.setColumnWidth(1, 100)
+        
         header = self.schema_tree.header()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(False)
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-        header = self.schema_tree.header()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft)
         self.schema_tree.setStyleSheet("""
     QHeaderView {
         background-color: #a9a9a9;
@@ -2487,6 +2491,7 @@ class MainWindow(QMainWindow):
 
     def load_postgres_schema(self, conn_data):
         try:
+            
             self.schema_model.clear()
             self.schema_model.setHorizontalHeaderLabels(["Name", "Type"])
             self.pg_conn = psycopg2.connect(host=conn_data["host"], database=conn_data["database"],
@@ -2519,10 +2524,9 @@ class MainWindow(QMainWindow):
         self.schema_tree.setColumnWidth(0, 200)
         self.schema_tree.setColumnWidth(1, 100)
         header = self.schema_tree.header()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft)
         self.schema_tree.setStyleSheet("""
     QHeaderView {
         background-color: #a9a9a9;
