@@ -70,7 +70,7 @@ class CodeEditor(QPlainTextEdit):
     # <<< FIX #2 >>> ADDED THE MISSING highlightCurrentLine METHOD
 
     def handle_line_number_area_click(self, event):
-        # Qt6: .position(), পুরনো ভার্সনে .pos()
+        # Qt6: .position()
         y = event.position().y() if hasattr(event, "position") else event.pos().y()
 
         block = self.firstVisibleBlock()
@@ -1662,9 +1662,11 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(notification_btn)
         header_layout.addWidget(processes_btn)
         
-        export_btn = QPushButton("Export Results")
-        export_btn.clicked.connect(self.export_current_results)
-        header_layout.addWidget(export_btn)
+        # <<< MODIFICATION START >>> - Button removed
+        # export_btn = QPushButton("Export Results")
+        # export_btn.clicked.connect(self.export_current_results)
+        # header_layout.addWidget(export_btn)
+        # <<< MODIFICATION END >>>
 
         header_layout.addStretch()
         results_layout.addWidget(results_header)
@@ -1675,6 +1677,12 @@ class MainWindow(QMainWindow):
         table_view = QTableView()
         table_view.setObjectName("result_table")
         table_view.setAlternatingRowColors(True)
+
+        # <<< MODIFICATION START >>> - Context menu added
+        table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table_view.customContextMenuRequested.connect(self.show_results_context_menu)
+        # <<< MODIFICATION END >>>
+
         results_stack.addWidget(table_view)
         table_view.verticalHeader().setVisible(False)
         table_view.verticalHeader().setDefaultSectionSize(28)
@@ -1751,6 +1759,98 @@ class MainWindow(QMainWindow):
             worksheet_count, tab_content, f"Worksheet {worksheet_count + 1}")
         self.tab_widget.setCurrentIndex(index)
         return tab_content
+
+    # <<< NEW METHOD START >>>
+    #position->user mouse position
+    def show_results_context_menu(self, position):
+        """Shows a context menu on the results table for exporting data."""
+        table_view = self.sender()
+        if not isinstance(table_view, QTableView):
+            return
+
+        menu = QMenu()
+        model = table_view.model()
+        selection_model = table_view.selectionModel()
+
+        # Automatically select the row that was right-clicked
+        index = table_view.indexAt(position)
+        if index.isValid():
+            table_view.selectRow(index.row())
+
+        # Action to export only the selected row
+        export_selected_action = QAction("Export Selected Row", self)
+        export_selected_action.triggered.connect(self.export_selected_result_row)
+        
+        # Action to export all rows (original functionality)
+        export_all_action = QAction("Export All Rows", self)
+        export_all_action.triggered.connect(self.export_current_results)
+        
+        # Enable actions based on data and selection
+        if not model or model.rowCount() == 0:
+            export_selected_action.setEnabled(False)
+            export_all_action.setEnabled(False)
+        elif not selection_model or not selection_model.hasSelection():
+            export_selected_action.setEnabled(False)
+
+        menu.addAction(export_selected_action)
+        menu.addAction(export_all_action)
+        
+        # Show the menu at the cursor's global position
+        menu.exec(table_view.viewport().mapToGlobal(position))
+    # <<< NEW METHOD END >>>
+
+    # <<< NEW METHOD START >>>
+    def export_selected_result_row(self):
+        """Exports only the currently selected row from the results table."""
+        current_tab = self.tab_widget.currentWidget()
+        if not current_tab:
+            return
+
+        table_view = current_tab.findChild(QTableView, "result_table")
+        model = table_view.model()
+        selection_model = table_view.selectionModel()
+
+        if not model or model.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "There is no data to export.")
+            return
+        
+        if not selection_model or not selection_model.hasSelection() or not selection_model.selectedRows():
+            QMessageBox.warning(self, "No Selection", "Please select a row to export.")
+            return
+
+        # Prepare data for the selected row
+        selected_row_index = selection_model.selectedRows()[0].row()#.row which find the row index
+        columns = [model.headerData(i, Qt.Orientation.Horizontal) for i in range(model.columnCount())]
+        row_data = [model.data(model.index(selected_row_index, col)) for col in range(model.columnCount())]
+        
+        dialog = ExportDialog(self, f"selected_row_{datetime.datetime.now().strftime('%Y%m%d')}.csv")
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        options = dialog.get_options()
+        file_path = options['filename']
+        if not file_path:
+            QMessageBox.warning(self, "No Filename", "Export cancelled. No filename specified.")
+            return
+
+        try:
+            self.status_message_label.setText("Exporting selected row...")
+            QApplication.processEvents()
+
+            df = pd.DataFrame([row_data], columns=columns)
+
+            if options['format'] == 'xlsx':
+                df.to_excel(file_path, index=False, header=options['header'])
+            else:
+                df.to_csv(file_path, index=False, header=options['header'], sep=options['delimiter'],
+                          encoding=options['encoding'], quotechar=options['quote'])
+
+            QMessageBox.information(self, "Success", f"Selected row successfully exported to:\n{file_path}")
+            self.status_message_label.setText(f"Exported 1 row to {os.path.basename(file_path)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"An error occurred while exporting the data:\n{e}")
+            self.status_message_label.setText("Export failed.")
+    # <<< NEW METHOD END >>>
 
     def export_current_results(self):
         current_tab = self.tab_widget.currentWidget()
@@ -2065,6 +2165,7 @@ class MainWindow(QMainWindow):
 
     def execute_query(self):
         current_tab = self.tab_widget.currentWidget()
+        #current_tab local variable
         if not current_tab:
             return
         editor_stack = current_tab.findChild(QStackedWidget, "editor_stack")
@@ -2126,32 +2227,32 @@ class MainWindow(QMainWindow):
         hours, minutes = divmod(minutes, 60)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
 
-    def handle_query_error(self, target_tab, error_message):
-        if target_tab in self.tab_timers:
-            self.tab_timers[target_tab]["timer"].stop()
-            self.tab_timers[target_tab]["timeout_timer"].stop()
-            del self.tab_timers[target_tab]
-        message_view = target_tab.findChild(QTextEdit, "message_view")
-        tab_status_label = target_tab.findChild(QLabel, "tab_status_label")
+    def handle_query_error(self, current_tab, error_message):
+        if current_tab in self.tab_timers:
+            self.tab_timers[current_tab]["timer"].stop()
+            self.tab_timers[current_tab]["timeout_timer"].stop()
+            del self.tab_timers[current_tab]
+        message_view = current_tab.findChild(QTextEdit, "message_view")
+        tab_status_label = current_tab.findChild(QLabel, "tab_status_label")
         message_view.setText(f"Error:\n\n{error_message}")
         tab_status_label.setText(f"Error: {error_message}")
         self.status_message_label.setText("Error occurred")
-        self.stop_spinner(target_tab, success=False)
-        if target_tab in self.running_queries:
-            del self.running_queries[target_tab]
+        self.stop_spinner(current_tab, success=False)
+        if current_tab in self.running_queries:
+            del self.running_queries[current_tab]
         if not self.running_queries:
             self.cancel_action.setEnabled(False)
 
-    def stop_spinner(self, target_tab, success=True):
-        if not target_tab:
+    def stop_spinner(self, current_tab, success=True):
+        if not current_tab:
             return
-        stacked_widget = target_tab.findChild(
+        stacked_widget = current_tab.findChild(
             QStackedWidget, "results_stacked_widget")
         if stacked_widget:
             spinner_label = stacked_widget.findChild(QLabel, "spinner_label")
             if spinner_label and spinner_label.movie():
                 spinner_label.movie().stop()
-            header = target_tab.findChild(QWidget, "resultsHeader")
+            header = current_tab.findChild(QWidget, "resultsHeader")
             buttons = header.findChildren(QPushButton)
             if success:
                 stacked_widget.setCurrentIndex(0)
@@ -2168,15 +2269,15 @@ class MainWindow(QMainWindow):
                     buttons[2].setChecked(False)
                     buttons[3].setChecked(False)
 
-    def handle_query_result(self, target_tab, conn_data, query, results, columns, row_count, elapsed_time, is_select_query):
-        if target_tab in self.tab_timers:
-            self.tab_timers[target_tab]["timer"].stop()
-            self.tab_timers[target_tab]["timeout_timer"].stop()
-            del self.tab_timers[target_tab]
+    def handle_query_result(self, current_tab, conn_data, query, results, columns, row_count, elapsed_time, is_select_query):
+        if current_tab in self.tab_timers:
+            self.tab_timers[current_tab]["timer"].stop()
+            self.tab_timers[current_tab]["timeout_timer"].stop()
+            del self.tab_timers[current_tab]
         self.save_query_to_history(
             conn_data, query, "Success", row_count, elapsed_time)
-        table_view, message_view, tab_status_label = target_tab.findChild(QTableView, "result_table"), target_tab.findChild(
-            QTextEdit, "message_view"), target_tab.findChild(QLabel, "tab_status_label")
+        table_view, message_view, tab_status_label = current_tab.findChild(QTableView, "result_table"), current_tab.findChild(
+            QTextEdit, "message_view"), current_tab.findChild(QLabel, "tab_status_label")
         formatted_time = self.format_duration_ms(elapsed_time)
         if is_select_query:
             model = QStandardItemModel()
@@ -2191,9 +2292,9 @@ class MainWindow(QMainWindow):
         message_view.setText(msg)
         tab_status_label.setText(status)
         self.status_message_label.setText("Ready")
-        self.stop_spinner(target_tab, success=True)
-        if target_tab in self.running_queries:
-            del self.running_queries[target_tab]
+        self.stop_spinner(current_tab, success=True)
+        if current_tab in self.running_queries:
+            del self.running_queries[current_tab]
         if not self.running_queries:
             self.cancel_action.setEnabled(False)
 
@@ -2228,10 +2329,10 @@ class MainWindow(QMainWindow):
             self.status.showMessage(
                 f"Could not save query to history: {e}", 4000)
 
-    def load_connection_history(self, target_tab):
-        history_list_view, history_details_view = target_tab.findChild(
-            QTreeView, "history_list_view"), target_tab.findChild(QTextEdit, "history_details_view")
-        db_combo_box = target_tab.findChild(QComboBox, "db_combo_box")
+    def load_connection_history(self, current_tab):
+        history_list_view, history_details_view = current_tab.findChild(
+            QTreeView, "history_list_view"), current_tab.findChild(QTextEdit, "history_details_view")
+        db_combo_box = current_tab.findChild(QComboBox, "db_combo_box")
         model = QStandardItemModel()
         model.setHorizontalHeaderLabels(['Connection History'])
         history_list_view.setModel(model)
@@ -2254,8 +2355,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Error", f"Failed to load query history:\n{e}")
 
-    def display_history_details(self, index, target_tab):
-        history_details_view = target_tab.findChild(
+    def display_history_details(self, index, current_tab):
+        history_details_view = current_tab.findChild(
             QTextEdit, "history_details_view")
         if not index.isValid() or not history_details_view:
             return
@@ -2263,8 +2364,8 @@ class MainWindow(QMainWindow):
         history_details_view.setText(
             f"Timestamp: {data['timestamp']}\nStatus: {data['status']}\nDuration: {data['duration']}\nRows: {data['rows']}\n\n-- Query --\n{data['query']}")
 
-    def _get_selected_history_item(self, target_tab):
-        selected_indexes = target_tab.findChild(
+    def _get_selected_history_item(self, current_tab):
+        selected_indexes = current_tab.findChild(
             QTreeView, "history_list_view").selectionModel().selectedIndexes()
         if not selected_indexes:
             QMessageBox.information(
@@ -2272,21 +2373,21 @@ class MainWindow(QMainWindow):
             return None
         return selected_indexes[0].model().itemFromIndex(selected_indexes[0]).data(Qt.ItemDataRole.UserRole)
 
-    def copy_history_query(self, target_tab):
-        history_data = self._get_selected_history_item(target_tab)
+    def copy_history_query(self, current_tab):
+        history_data = self._get_selected_history_item(current_tab)
         if history_data:
             QApplication.clipboard().setText(history_data['query'])
             self.status_message_label.setText("Query copied to clipboard.")
 
-    def copy_history_to_editor(self, target_tab):
-        history_data = self._get_selected_history_item(target_tab)
+    def copy_history_to_editor(self, current_tab):
+        history_data = self._get_selected_history_item(current_tab)
         if history_data:
-            target_tab.findChild(CodeEditor, "query_editor").setPlainText(
+            current_tab.findChild(CodeEditor, "query_editor").setPlainText(
                 history_data['query'])
-            target_tab.findChild(
+            current_tab.findChild(
                 QStackedWidget, "editor_stack").setCurrentIndex(0)
-            query_view_btn = target_tab.findChild(QPushButton, "Query")
-            history_view_btn = target_tab.findChild(
+            query_view_btn = current_tab.findChild(QPushButton, "Query")
+            history_view_btn = current_tab.findChild(
                 QPushButton, "Query History")
             if query_view_btn:
                 query_view_btn.setChecked(True)
@@ -2294,32 +2395,32 @@ class MainWindow(QMainWindow):
                 history_view_btn.setChecked(False)
             self.status_message_label.setText("Query copied to editor.")
 
-    def remove_selected_history(self, target_tab):
-        history_data = self._get_selected_history_item(target_tab)
+    def remove_selected_history(self, current_tab):
+        history_data = self._get_selected_history_item(current_tab)
         if not history_data:
             return
         if QMessageBox.question(self, "Remove History", "Are you sure you want to remove the selected query history?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
             try:
                 db.delete_history_item(history_data['id'])
-                self.load_connection_history(target_tab)
-                target_tab.findChild(QTextEdit, "history_details_view").clear()
+                self.load_connection_history(current_tab)
+                current_tab.findChild(QTextEdit, "history_details_view").clear()
             except Exception as e:
                 QMessageBox.critical(
                     self, "Error", f"Failed to remove history item:\n{e}")
 
-    def remove_all_history_for_connection(self, target_tab):
-        conn_data = target_tab.findChild(
+    def remove_all_history_for_connection(self, current_tab):
+        conn_data = current_tab.findChild(
             QComboBox, "db_combo_box").currentData()
         if not conn_data:
             QMessageBox.warning(self, "No Connection",
                                 "Please select a connection first.")
             return
-        conn_name = target_tab.findChild(
+        conn_name = current_tab.findChild(
             QComboBox, "db_combo_box").currentText()
         if QMessageBox.question(self, "Remove All History", f"Are you sure you want to remove all history for the connection:\n'{conn_name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
             try:
                 db.delete_all_history_for_connection(conn_data.get("id"))
-                self.load_connection_history(target_tab)
+                self.load_connection_history(current_tab)
             except Exception as e:
                 QMessageBox.critical(
                     self, "Error", f"Failed to clear history for this connection:\n{e}")
