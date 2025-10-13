@@ -126,6 +126,57 @@ class ProcessSignals(QObject):
     error = pyqtSignal(str, str)
 
 
+# class RunnableExport(QRunnable):
+#     def __init__(self, process_id, item_data, table_name, export_options, signals):
+#         super().__init__()
+#         self.process_id = process_id
+#         self.item_data = item_data
+#         self.table_name = table_name
+#         self.export_options = export_options
+#         self.signals = signals
+
+#     def run(self):
+#         start_time = time.time()
+#         conn = None
+#         try:
+#             conn_data = self.item_data['conn_data']
+#             db_type = self.item_data.get('db_type')
+#             if db_type == 'sqlite':
+#                 conn = db.create_sqlite_connection(conn_data["db_path"])
+#                 query = f'SELECT * FROM "{self.table_name}"'
+#             elif db_type == 'postgres':
+#                 conn = db.create_postgres_connection(
+#                     host=conn_data["host"], database=conn_data["database"], user=conn_data["user"], password=conn_data["password"], port=int(conn_data["port"]))
+#                 schema_name = self.item_data.get("schema_name")
+#                 query = f'SELECT * FROM "{schema_name}"."{self.table_name}"'
+#             else:
+#                 raise ValueError("Unsupported database type for export.")
+#             if not conn:
+#                 raise ConnectionError(
+#                     "Failed to connect to the database for export.")
+#             df = pd.read_sql_query(query, conn)
+#             file_path, file_format = self.export_options['filename'], self.export_options['format']
+#             if file_format == 'xlsx':
+#                 df.to_excel(file_path, index=False,
+#                             header=self.export_options['header'])
+#             else:
+#                 df.to_csv(file_path, index=False, header=self.export_options['header'], sep=self.export_options[
+#                           'delimiter'], encoding=self.export_options['encoding'], quotechar=self.export_options['quote'])
+#             time_taken = time.time() - start_time
+#             success_message = f"Successfully exported {len(df)} rows to {os.path.basename(file_path)}"
+#             self.signals.finished.emit(
+#                 self.process_id, success_message, time_taken)
+#         except Exception as e:
+#             error_msg = f"An error occurred during export: {e}"
+#             print(error_msg)   # ✅ Print to console for debugging
+#             import traceback
+#             traceback.print_exc()   # ✅ Show full error stack
+#             self.signals.error.emit(self.process_id, error_msg)
+
+#         finally:
+#             if conn:
+#                 conn.close()
+
 class RunnableExport(QRunnable):
     def __init__(self, process_id, item_data, table_name, export_options, signals):
         super().__init__()
@@ -139,8 +190,10 @@ class RunnableExport(QRunnable):
         start_time = time.time()
         conn = None
         try:
+            # Step 1: Database connection and query setup 
             conn_data = self.item_data['conn_data']
             db_type = self.item_data.get('db_type')
+            
             if db_type == 'sqlite':
                 conn = db.create_sqlite_connection(conn_data["db_path"])
                 query = f'SELECT * FROM "{self.table_name}"'
@@ -151,26 +204,43 @@ class RunnableExport(QRunnable):
                 query = f'SELECT * FROM "{schema_name}"."{self.table_name}"'
             else:
                 raise ValueError("Unsupported database type for export.")
+            
             if not conn:
-                raise ConnectionError(
-                    "Failed to connect to the database for export.")
-            df = pd.read_sql_query(query, conn)
-            file_path, file_format = self.export_options['filename'], self.export_options['format']
+                raise ConnectionError("Failed to connect to the database for export.")
+
+            # Step 2: Manually create DataFrame 
+            cursor = conn.cursor()
+            cursor.execute(query)
+            
+            # get column name
+            headers = [desc[0] for desc in cursor.description]
+            
+            # fetches all rows from the execute query result
+            data = cursor.fetchall()
+            
+            # DataFrame 
+            df = pd.DataFrame(data, columns=headers)
+            
+            
+            file_path = self.export_options['filename']
+            file_format = self.export_options['format']
             if file_format == 'xlsx':
                 df.to_excel(file_path, index=False,
                             header=self.export_options['header'])
             else:
                 df.to_csv(file_path, index=False, header=self.export_options['header'], sep=self.export_options[
                           'delimiter'], encoding=self.export_options['encoding'], quotechar=self.export_options['quote'])
+            
             time_taken = time.time() - start_time
             success_message = f"Successfully exported {len(df)} rows to {os.path.basename(file_path)}"
             self.signals.finished.emit(
                 self.process_id, success_message, time_taken)
+                
         except Exception as e:
             error_msg = f"An error occurred during export: {e}"
-            print(error_msg)   # ✅ Print to console for debugging
+            print(error_msg)
             import traceback
-            traceback.print_exc()   # ✅ Show full error stack
+            traceback.print_exc()
             self.signals.error.emit(self.process_id, error_msg)
 
         finally:
