@@ -21,9 +21,9 @@ class SQLiteConnectionDialog(QDialog):
         form.addRow("Database Path:", self.path_input)
 
         self.browse_btn = QPushButton("Browse")
-        self.browse_btn.clicked.connect(self.browse_file)
+        self.browse_btn.clicked.connect(self.browseFile)
         self.create_btn = QPushButton("Create New DB")
-        self.create_btn.clicked.connect(self.create_new_db)
+        self.create_btn.clicked.connect(self.createNewDatabase)
 
         path_layout = QHBoxLayout()
         path_layout.addWidget(self.browse_btn)
@@ -35,7 +35,7 @@ class SQLiteConnectionDialog(QDialog):
             self.path_input.setText(self.conn_data.get("db_path", ""))
 
         self.save_btn = QPushButton("Update" if is_editing else "Save")
-        self.save_btn.clicked.connect(self.save_connection)
+        self.save_btn.clicked.connect(self.saveConnection)
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.clicked.connect(self.reject)
 
@@ -49,13 +49,13 @@ class SQLiteConnectionDialog(QDialog):
         layout.addLayout(button_layout)
         self.setLayout(layout)
 
-    def browse_file(self):
+    def browseFile(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select SQLite DB", "", "SQLite Database (*.db *.sqlite *.sqlite3)")
         if file_path:
             self.path_input.setText(file_path)
 
-    def create_new_db(self):
+    def createNewDatabase(self):
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Create New SQLite DB", "", "SQLite Database (*.db *.sqlite *.sqlite3)")
         if file_path:
@@ -68,13 +68,13 @@ class SQLiteConnectionDialog(QDialog):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not create database:\n{e}")
 
-    def save_connection(self):
+    def saveConnection(self):
         if not self.name_input.text().strip() or not self.path_input.text().strip():
             QMessageBox.warning(self, "Missing Info", "Both fields are required.")
             return
         self.accept()
 
-    def get_data(self):
+    def getData(self):
         return {
             "name": self.name_input.text(),
             "db_path": self.path_input.text(),
