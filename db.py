@@ -83,29 +83,29 @@ def create_oracle_connection(host, port, service_name, user, password):
 
 
 def get_all_connections_from_db():
-    """Returns a list of dicts with full hierarchical connection info from items table."""
+    """Returns a list of dicts with full hierarchical connection info from usf_connections table."""
     with sqlite.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
             SELECT 
                 i.id, c.name, sc.name, i.name, i.short_name, i.host, i.port, 
                 i."database", i.db_path, i.user, i.password
-            FROM items i
-            LEFT JOIN subcategories sc ON i.subcategory_id = sc.id
-            LEFT JOIN categories c ON sc.category_id = c.id
+            FROM usf_connections i
+            LEFT JOIN usf_connection_groups sc ON i.connection_group_id = sc.id
+            LEFT JOIN usf_connection_types c ON sc.connection_type_id = c.id
             ORDER BY i.usage_count DESC, c.name, sc.name, i.name
         """)
         rows = c.fetchall()
 
     connections = []
     for row in rows:
-        (item_id, cat_name, subcat_name, item_name, short_name, host,
+        (connection_id, connection_type_name, connection_group_name, connection_name, short_name, host,
          port, dbname, db_path, user, password) = row
-        full_name = f"{cat_name} -> {subcat_name} -> {item_name} ({short_name})"
+        full_name = f"{connection_type_name} -> {connection_group_name} -> {connection_name} ({short_name})"
         connections.append({
-            "id": item_id,
+            "id": connection_id,
             "display_name": full_name,
-            "name": item_name,
+            "name": connection_name,
             "short_name": short_name,
             "host": host,
             "port": port,
@@ -118,75 +118,75 @@ def get_all_connections_from_db():
 
 
 def get_hierarchy_data():
-    """Returns all categories, subcategories, and items for the main tree view."""
+    """Returns all usf_connection_types, usf_connection_groups, and usf_connections for the main tree view."""
     with sqlite.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("SELECT id, name FROM categories")
-        categories = c.fetchall()
+        c.execute("SELECT id, name FROM usf_connection_types")
+        usf_connection_types = c.fetchall()
 
         data = []
-        for cat_id, cat_name in categories:
-            cat_data = {'id': cat_id, 'name': cat_name, 'subcategories': []}
+        for connection_type_id, connection_type_name in usf_connection_types:
+            connection_type_data = {'id': connection_type_id, 'name': connection_type_name, 'usf_connection_groups': []}
             c.execute(
-                "SELECT id, name FROM subcategories WHERE category_id=?", (cat_id,))
-            subcats = c.fetchall()
+                "SELECT id, name FROM usf_connection_groups WHERE connection_type_id=?", (connection_type_id,))
+            connection_groups = c.fetchall()
 
-            for subcat_id, subcat_name in subcats:
-                subcat_data = {'id': subcat_id,
-                               'name': subcat_name, 'items': []}
+            for connection_group_id, connection_group_name in connection_groups:
+                connection_group_data = {'id': connection_group_id,
+                               'name': connection_group_name, 'usf_connections': []}
                 c.execute(
-                    "SELECT id, name, short_name, host, \"database\", \"user\", password, port, db_path FROM items WHERE subcategory_id=?", (subcat_id,))
-                items = c.fetchall()
-                for item_row in items:
-                    item_id, name, short_name, host, db, user, pwd, port, db_path = item_row
-                    conn_data = {"id": item_id, "name": name, "short_name": short_name, "host": host, "database": db,
+                    "SELECT id, name, short_name, host, \"database\", \"user\", password, port, db_path FROM usf_connections WHERE connection_group_id=?", (connection_group_id,))
+                usf_connections = c.fetchall()
+                for connections in usf_connections:
+                    connection_id, name, short_name, host, db, user, pwd, port, db_path = connections
+                    conn_data = {"id": connection_id, "name": name, "short_name": short_name, "host": host, "database": db,
                                  "user": user, "password": pwd, "port": port, "db_path": db_path}
-                    subcat_data['items'].append(conn_data)
-                cat_data['subcategories'].append(subcat_data)
-            data.append(cat_data)
+                    connection_group_data['usf_connections'].append(conn_data)
+                connection_type_data['usf_connection_groups'].append(connection_group_data)
+            data.append(connection_type_data)
     return data
 
 # --- Data Modification Functions (No Changes) ---
 
 
-def add_subcategory(name, parent_id):
+def add_connection_group(name, parent_id):
     with sqlite.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute(
-            "INSERT INTO subcategories (name, category_id) VALUES (?, ?)", (name, parent_id))
+            "INSERT INTO usf_connection_groups (name, connection_type_id) VALUES (?, ?)", (name, parent_id))
         conn.commit()
 
 
-def add_item(data, subcat_id):
+def add_connection(data, connection_group_id):
     with sqlite.connect(DB_FILE) as conn:
         c = conn.cursor()
         if "db_path" in data:  # SQLite
-            c.execute("INSERT INTO items (name, short_name, subcategory_id, db_path) VALUES (?, ?, ?)",
-                      (data["name"], data["short_name"], subcat_id, data["db_path"]))
+            c.execute("INSERT INTO usf_connections (name, short_name, connection_group_id, db_path) VALUES (?, ?, ?)",
+                      (data["name"], data["short_name"], connection_group_id, data["db_path"]))
         else:  # Postgres/Oracle
-            c.execute("INSERT INTO items (name, short_name, subcategory_id, host, \"database\", \"user\", password, port) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                      (data["name"], data["short_name"], subcat_id, data["host"], data["database"], data["user"], data["password"], data["port"]))
+            c.execute("INSERT INTO usf_connections (name, short_name, connection_group_id, host, \"database\", \"user\", password, port) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                      (data["name"], data["short_name"], connection_group_id, data["host"], data["database"], data["user"], data["password"], data["port"]))
         conn.commit()
 
 
-def update_item(data):
+def update_connection(data):
     with sqlite.connect(DB_FILE) as conn:
         c = conn.cursor()
         if "db_path" in data:  # SQLite
-            c.execute("UPDATE items SET name = ?, short_name = ?, db_path = ? WHERE id = ?",
+            c.execute("UPDATE usf_connections SET name = ?, short_name = ?, db_path = ? WHERE id = ?",
                       (data["name"], data["short_name"], data["db_path"], data["id"]))
         else:  # Postgres/Oracle
-            c.execute("UPDATE items SET name = ?, short_name = ?, host = ?, database = ?, user = ?, password = ?, port = ? WHERE id = ?",
+            c.execute("UPDATE usf_connections SET name = ?, short_name = ?, host = ?, database = ?, user = ?, password = ?, port = ? WHERE id = ?",
                       (data["name"], data["short_name"], data["host"], data["database"], data["user"], data["password"], data["port"], data["id"]))
         conn.commit()
 
 
-def delete_item(item_id):
+def delete_connection(connection_id):
     with sqlite.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("DELETE FROM items WHERE id = ?", (item_id,))
+        c.execute("DELETE FROM usf_connections WHERE id = ?", (connection_id,))
         c.execute(
-            "DELETE FROM query_history WHERE connection_item_id = ?", (item_id,))
+            "DELETE FROM usf_query_history WHERE connection_id = ?", (connection_id,))
         conn.commit()
 
 # --- History Functions (No Changes) ---
@@ -196,8 +196,8 @@ def save_query_history(conn_id, query, status, rows, duration):
     with sqlite.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("""
-            INSERT INTO query_history 
-            (connection_item_id, query_text, status, rows_affected, execution_time_sec, timestamp) 
+            INSERT INTO usf_query_history 
+            (connection_id, query_text, status, rows_affected, execution_time_sec, timestamp) 
             VALUES (?, ?, ?, ?, ?, ?)""",
                   (conn_id, query, status, rows, duration, datetime.datetime.now().isoformat()))
         conn.commit()
@@ -208,23 +208,23 @@ def get_query_history(conn_id):
         c = conn.cursor()
         c.execute("""
             SELECT id, query_text, timestamp, status, rows_affected, execution_time_sec 
-            FROM query_history WHERE connection_item_id = ? ORDER BY timestamp DESC""",
+            FROM usf_query_history WHERE connection_id = ? ORDER BY timestamp DESC""",
                   (conn_id,))
         return c.fetchall()
 
 
-def delete_history_item(history_id):
+def delete_history(history_id):
     with sqlite.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute("DELETE FROM query_history WHERE id = ?", (history_id,))
+        c.execute("DELETE FROM usf_query_history WHERE id = ?", (history_id,))
         conn.commit()
 
 
-def delete_all_history_for_connection(conn_id):
+def delete_all_history(conn_id):
     with sqlite.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute(
-            "DELETE FROM query_history WHERE connection_item_id = ?", (conn_id,))
+            "DELETE FROM usf_query_history WHERE connection_id = ?", (conn_id,))
         conn.commit()
 
 # --- Database Initialization ---
@@ -241,20 +241,20 @@ def initialize_database():
         c = conn.cursor()
         # --- Schema Setup and Migration ---
         c.execute(
-            "CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)")
-        c.execute("CREATE TABLE IF NOT EXISTS subcategories (id INTEGER PRIMARY KEY, name TEXT, category_id INTEGER, FOREIGN KEY (category_id) REFERENCES categories (id))")
-        c.execute("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT, subcategory_id INTEGER, host TEXT, \"database\" TEXT, \"user\" TEXT, password TEXT, port INTEGER, db_path TEXT, FOREIGN KEY (subcategory_id) REFERENCES subcategories (id))")
+            "CREATE TABLE IF NOT EXISTS usf_connection_types (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)")
+        c.execute("CREATE TABLE IF NOT EXISTS usf_connection_groups (id INTEGER PRIMARY KEY, name TEXT, connection_type_id INTEGER, FOREIGN KEY (connection_type_id) REFERENCES usf_connection_types (id))")
+        c.execute("CREATE TABLE IF NOT EXISTS usf_connections (id INTEGER PRIMARY KEY, name TEXT, connection_group_id INTEGER, host TEXT, \"database\" TEXT, \"user\" TEXT, password TEXT, port INTEGER, db_path TEXT, FOREIGN KEY (connection_group_id) REFERENCES usf_connection_groups (id))")
 
-        c.execute("SELECT COUNT(*) FROM categories")
+        c.execute("SELECT COUNT(*) FROM usf_connection_types")
         if c.fetchone()[0] == 0:
             c.execute(
-                "INSERT OR IGNORE INTO categories (name) VALUES ('PostgreSQL Connections'), ('SQLite Connections'), ('Oracle Connections')")
+                "INSERT OR IGNORE INTO usf_connection_types (name) VALUES ('PostgreSQL Connections'), ('SQLite Connections'), ('Oracle Connections')")
 
-        c.execute("PRAGMA table_info(items)")
+        c.execute("PRAGMA table_info(usf_connections)")
         columns = [col[1] for col in c.fetchall()]
         if 'usage_count' not in columns:
             c.execute(
-                "ALTER TABLE items ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0")
+                "ALTER TABLE usf_connections ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0")
 
-        c.execute("CREATE TABLE IF NOT EXISTS query_history (id INTEGER PRIMARY KEY, connection_item_id INTEGER, query_text TEXT, status TEXT, rows_affected INTEGER, execution_time_sec REAL, timestamp TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS usf_query_history (id INTEGER PRIMARY KEY, connection_id INTEGER, query_text TEXT, status TEXT, rows_affected INTEGER, execution_time_sec REAL, timestamp TEXT)")
         conn.commit()

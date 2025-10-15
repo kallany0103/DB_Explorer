@@ -26,10 +26,10 @@ class OracleConnectionDialog(QDialog):
         form.addRow("DSN (Host/Port/Service):", self.dsn_input)
 
         self.test_btn = QPushButton("Test Connection")
-        self.test_btn.clicked.connect(self.test_connection)
+        self.test_btn.clicked.connect(self.testConnection)
 
         self.save_btn = QPushButton("Update" if is_editing else "Save")
-        self.save_btn.clicked.connect(self.save_connection)
+        self.save_btn.clicked.connect(self.saveConnection)
 
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.clicked.connect(self.reject)
@@ -45,7 +45,7 @@ class OracleConnectionDialog(QDialog):
         layout.addLayout(button_layout)
         self.setLayout(layout)
 
-    def test_connection(self):
+    def testConnection(self):
         user = self.user_input.text()
         pwd = self.password_input.text()
         dsn = self.dsn_input.text()
@@ -61,7 +61,7 @@ class OracleConnectionDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to connect:\n{e}")
 
-    def save_connection(self):
+    def saveConnection(self):
         if not self.name_input.text().strip():
             QMessageBox.warning(self, "Missing Info", "Connection name is required.")
             return
@@ -70,7 +70,7 @@ class OracleConnectionDialog(QDialog):
             return
         self.accept()
 
-    def get_data(self):
+    def getData(self):
         return {
             "name": self.name_input.text(),
             "user": self.user_input.text(),

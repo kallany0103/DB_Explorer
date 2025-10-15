@@ -30,10 +30,10 @@ class PostgresConnectionDialog(QDialog):
         form.addRow("Password:", self.password_input)
 
         self.test_btn = QPushButton("Test Connection")
-        self.test_btn.clicked.connect(self.test_connection)
+        self.test_btn.clicked.connect(self.testConnection)
 
         self.save_btn = QPushButton("Update" if is_editing else "Save")
-        self.save_btn.clicked.connect(self.save_connection)
+        self.save_btn.clicked.connect(self.saveConnection)
 
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.clicked.connect(self.reject)
@@ -49,7 +49,7 @@ class PostgresConnectionDialog(QDialog):
         layout.addLayout(button_layout)
         self.setLayout(layout)
 
-    def test_connection(self):
+    def testConnection(self):
         try:
             conn = psycopg2.connect(
                 host=self.host_input.text(),
@@ -63,13 +63,13 @@ class PostgresConnectionDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to connect:\n{e}")
 
-    def save_connection(self):
+    def saveConnection(self):
         if not self.name_input.text().strip():
             QMessageBox.warning(self, "Missing Info", "Connection name is required.")
             return
         self.accept()
 
-    def get_data(self):
+    def getData(self):
         return {
             "name": self.name_input.text(),
             "short_name": self.short_name_input.text(),

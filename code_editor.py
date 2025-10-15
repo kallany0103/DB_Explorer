@@ -14,7 +14,7 @@ class LineNumberArea(QWidget):
         self.code_editor.lineNumberAreaPaintEvent(event)
 
     def mousePressEvent(self, event):
-        self.code_editor.handle_line_number_area_click(event)
+        self.code_editor.handleLineNumberAreaClick(event)
 
 
 class CodeEditor(QPlainTextEdit):
@@ -29,7 +29,7 @@ class CodeEditor(QPlainTextEdit):
 
         self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
         self.updateRequest.connect(self.updateLineNumberArea)
-        self.textChanged.connect(self.update_folding_markers)
+        self.textChanged.connect(self.updateFoldingMarkers)
         #self.textChanged.connect(self.on_text_changed)
 
         self.cursorPositionChanged.connect(self.highlightCurrentLine)
@@ -64,27 +64,6 @@ class CodeEditor(QPlainTextEdit):
         super().resizeEvent(event)
         cr = self.contentsRect()
         self.lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
-
-    # def lineNumberAreaPaintEvent(self, event):
-    #     painter = QPainter(self.lineNumberArea)
-    #     painter.fillRect(event.rect(), QColor(240, 240, 240))  # light gray background
-
-    #     block = self.firstVisibleBlock()
-    #     blockNumber = block.blockNumber()
-    #     top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
-    #     bottom = top + int(self.blockBoundingRect(block).height())
-
-    #     while block.isValid() and top <= event.rect().bottom():
-    #         if block.isVisible() and bottom >= event.rect().top():
-    #             number = str(blockNumber + 1)
-    #             painter.setPen(Qt.GlobalColor.black)
-    #             painter.drawText(0, top, self.lineNumberArea.width() - 4, self.fontMetrics().height(),
-    #                              Qt.AlignmentFlag.AlignRight, number)
-
-    #         block = block.next()
-    #         top = bottom
-    #         bottom = top + int(self.blockBoundingRect(block).height())
-    #         blockNumber += 1
 
 
     def lineNumberAreaPaintEvent(self, event):
@@ -135,7 +114,7 @@ class CodeEditor(QPlainTextEdit):
             blockNumber += 1
 
 
-    def update_folding_markers(self):
+    def updateFoldingMarkers(self):
         new_markers = {}
         processed_lines = set()
 
@@ -189,7 +168,7 @@ class CodeEditor(QPlainTextEdit):
 
 
 
-    def toggle_fold(self, block_number: int) -> None:
+    def toggleFold(self, block_number: int) -> None:
         # """
         #  Fold/unfold the region that starts at `block_number`.
         # Expects self.folding_markers[block_number] = {"open": bool, "end": int}
@@ -234,7 +213,7 @@ class CodeEditor(QPlainTextEdit):
 
     # def on_text_changed(self):
     #     # A simple debounce mechanism could be added here if performance is an issue
-    #     self.update_folding_markers()
+    #     self.updateFoldingMarkers()
 
 
     def mousePressEvent(self, event):
@@ -251,7 +230,7 @@ class CodeEditor(QPlainTextEdit):
                 bottom = top + self.blockBoundingRect(block).height()
                 if top <= event.pos().y() < bottom:
                     if block.blockNumber() in self.folding_markers:
-                        self.toggle_fold(block.blockNumber())
+                        self.toggleFold(block.blockNumber())
                         return
                     break
                 block = block.next()
@@ -260,7 +239,7 @@ class CodeEditor(QPlainTextEdit):
         super().mousePressEvent(event)
 
 
-    def handle_line_number_area_click(self, event):
+    def handleLineNumberAreaClick(self, event):
         # Qt6: .position()
         y = event.position().y() if hasattr(event, "position") else event.pos().y()
 
@@ -273,7 +252,7 @@ class CodeEditor(QPlainTextEdit):
             if top <= y < bottom:
                 bn = block.blockNumber()
                 if bn in self.folding_markers:
-                    self.toggle_fold(bn)
+                    self.toggleFold(bn)
                 break
             block = block.next()
             top = bottom

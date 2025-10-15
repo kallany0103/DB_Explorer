@@ -796,7 +796,7 @@ class MainWindow(QMainWindow):
         db_combo_box = QComboBox()
         db_combo_box.setObjectName("db_combo_box")
         layout.addWidget(db_combo_box)
-        self.load_joined_items(db_combo_box)
+        self.load_joined_connections(db_combo_box)
 
         main_vertical_splitter = QSplitter(Qt.Orientation.Vertical)
         main_vertical_splitter.setObjectName("tab_vertical_splitter")
@@ -1050,18 +1050,18 @@ class MainWindow(QMainWindow):
         self.model.clear()
         self.model.setHorizontalHeaderLabels(["Object Explorer"])
         hierarchical_data = db.get_hierarchy_data()
-        for cat_data in hierarchical_data:
-            cat_item = QStandardItem(cat_data['name'])
-            cat_item.setData(cat_data['id'], Qt.ItemDataRole.UserRole + 1)
-            for subcat_data in cat_data['subcategories']:
-                subcat_item = QStandardItem(subcat_data['name'])
-                subcat_item.setData(subcat_data['id'], Qt.ItemDataRole.UserRole + 1)
-                for item_data in subcat_data['items']:
-                    item_item = QStandardItem(item_data['name'])
-                    item_item.setData(item_data, Qt.ItemDataRole.UserRole)
-                    subcat_item.appendRow(item_item)
-                cat_item.appendRow(subcat_item)
-            self.model.appendRow(cat_item)
+        for connection_type_data in hierarchical_data:
+            connection_type_item = QStandardItem(connection_type_data['name'])
+            connection_type_item.setData(connection_type_data['id'], Qt.ItemDataRole.UserRole + 1)
+            for connection_group_data in connection_type_data['usf_connection_groups']:
+                connection_group_item = QStandardItem(connection_group_data['name'])
+                connection_group_item.setData(connection_group_data['id'], Qt.ItemDataRole.UserRole + 1)
+                for connection_data in connection_group_data['usf_connections']:
+                    connection_item = QStandardItem(connection_data['name'])
+                    connection_item.setData(connection_data, Qt.ItemDataRole.UserRole)
+                    connection_group_item.appendRow(connection_item)
+                connection_type_item.appendRow(connection_group_item)
+            self.model.appendRow(connection_type_item)
 
     # def item_clicked(self, index):
     #     item = self.model.itemFromIndex(index)
@@ -1091,19 +1091,19 @@ class MainWindow(QMainWindow):
             parent_group = item.parent()
             if not parent_group:
                 return
-            main_category = parent_group.parent()
-            if not main_category:
+            connection_type = parent_group.parent()
+            if not connection_type:
                 return
-            category_name = main_category.text().lower()
-            if "postgres" in category_name and conn_data.get("host"):
+            connection_type_name = connection_type.text().lower()
+            if "postgres" in connection_type_name and conn_data.get("host"):
                 self.status.showMessage(
                     f"Loading schema for {conn_data.get('name')}...", 3000)
                 self.load_postgres_schema(conn_data)
-            elif "sqlite" in category_name and conn_data.get("db_path"):
+            elif "sqlite" in connection_type_name and conn_data.get("db_path"):
                 self.status.showMessage(
                     f"Loading schema for {conn_data.get('name')}...", 3000)
                 self.load_sqlite_schema(conn_data)
-            elif "oracle" in category_name:
+            elif "oracle" in connection_type_name:
                 self.status.showMessage(
                     "Oracle connections are not currently supported.", 5000)
                 QMessageBox.information(
@@ -1136,18 +1136,18 @@ class MainWindow(QMainWindow):
         depth = self.get_item_depth(item)
         menu = QMenu()
         if depth == 1:
-            add_subcat = QAction("Add Group", self)
-            add_subcat.triggered.connect(lambda: self.add_subcategory(item))
-            menu.addAction(add_subcat)
+            add_connection_group = QAction("Add Group", self)
+            add_connection_group.triggered.connect(lambda: self.add_connection_group(item))
+            menu.addAction(add_connection_group)
         elif depth == 2:
-            parent_category_item = item.parent()
-            if parent_category_item:
-                category_name = parent_category_item.text()
-                if "postgres" in category_name.lower():
+            parent_connection_type = item.parent()
+            if parent_connection_type:
+                connection_type_name = parent_connection_type.text()
+                if "postgres" in connection_type_name.lower():
                     add_pg_action = QAction("Add New PostgreSQL Connection", self)
                     add_pg_action.triggered.connect(lambda: self.add_postgres_connection(item))
                     menu.addAction(add_pg_action)
-                elif "sqlite" in category_name.lower():
+                elif "sqlite" in connection_type_name.lower():
                     add_sqlite_action = QAction("Add New SQLite Connection", self)
                     add_sqlite_action.triggered.connect(lambda: self.add_sqlite_connection(item))
                     menu.addAction(add_sqlite_action)
@@ -1161,14 +1161,14 @@ class MainWindow(QMainWindow):
                 menu.addSeparator()
                 if conn_data.get("db_path"):
                     edit_action = QAction("Edit Connection", self)
-                    edit_action.triggered.connect(lambda: self.edit_item(item))
+                    edit_action.triggered.connect(lambda: self.edit_connection(item))
                     menu.addAction(edit_action)
                 elif conn_data.get("host"):
                     edit_action = QAction("Edit Connection", self)
-                    edit_action.triggered.connect(lambda: self.edit_pg_item(item))
+                    edit_action.triggered.connect(lambda: self.edit_pg_connection(item))
                     menu.addAction(edit_action)
                 delete_action = QAction("Delete Connection", self)
-                delete_action.triggered.connect(lambda: self.delete_item(item))
+                delete_action.triggered.connect(lambda: self.delete_connection(item))
                 menu.addAction(delete_action)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
@@ -1215,51 +1215,51 @@ class MainWindow(QMainWindow):
       msg.exec()
 
 
-    def add_subcategory(self, parent_item):
+    def add_connection_group(self, parent_item):
         name, ok = QInputDialog.getText(self, "New Group", "Group name:")
         if ok and name:
             parent_id = parent_item.data(Qt.ItemDataRole.UserRole+1)
-            db.add_subcategory(name, parent_id)
+            db.add_connection_group(name, parent_id)
             self.load_data()
 
     def add_postgres_connection(self, parent_item):
-        subcat_id = parent_item.data(Qt.ItemDataRole.UserRole + 1)
+        connection_group_id = parent_item.data(Qt.ItemDataRole.UserRole + 1)
         dialog = PostgresConnectionDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            data = dialog.get_data()
+            data = dialog.getData()
             try:
-                db.add_item(data, subcat_id)
+                db.add_connection(data, connection_group_id)
                 self.load_data()
                 self.refresh_all_comboboxes()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save PostgreSQL connection:\n{e}")
 
     def add_sqlite_connection(self, parent_item):
-        subcat_id = parent_item.data(Qt.ItemDataRole.UserRole + 1)
+        connection_group_id = parent_item.data(Qt.ItemDataRole.UserRole + 1)
         dialog = SQLiteConnectionDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            data = dialog.get_data()
+            data = dialog.getData()
             try:
-                db.add_item(data, subcat_id)
+                db.add_connection(data, connection_group_id)
                 self.load_data()
                 self.refresh_all_comboboxes()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save SQLite connection:\n{e}")
 
-    def edit_item(self, item):
+    def edit_connection(self, item):
         conn_data = item.data(Qt.ItemDataRole.UserRole)
         if conn_data and conn_data.get("db_path"):
             dialog = SQLiteConnectionDialog(self, conn_data=conn_data)
             if dialog.exec() == QDialog.DialogCode.Accepted:
-                new_data = dialog.get_data()
+                new_data = dialog.getData()
                 try:
-                    db.update_item(new_data)
+                    db.update_connection(new_data)
                     self.load_data()
                     self.refresh_all_comboboxes()
                 except Exception as e:
                     QMessageBox.critical(self, "Error", f"Failed to update SQLite connection:\n{e}")
 
-    def edit_pg_item(self, item):
+    def edit_pg_connection(self, item):
         conn_data = item.data(Qt.ItemDataRole.UserRole)
         if not conn_data: return
         dialog = PostgresConnectionDialog(self, is_editing=True)
@@ -1271,44 +1271,44 @@ class MainWindow(QMainWindow):
         dialog.user_input.setText(conn_data.get("user", ""))
         dialog.password_input.setText(conn_data.get("password", ""))
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_data = dialog.get_data()
+            new_data = dialog.getData()
             new_data["id"] = conn_data.get("id") # Make sure to pass the ID for update
             try:
-                db.update_item(new_data)
+                db.update_connection(new_data)
                 self.load_data()
                 self.refresh_all_comboboxes()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to update PostgreSQL connection:\n{e}")
 
-    def delete_item(self, item):
+    def delete_connection(self, item):
         conn_data = item.data(Qt.ItemDataRole.UserRole)
-        item_id = conn_data.get("id")
+        connection_id = conn_data.get("id")
         reply = QMessageBox.question(self, "Delete Connection", "Are you sure you want to delete this connection?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                db.delete_item(item_id)
+                db.delete_connection(connection_id)
                 self.load_data()
                 self.refresh_all_comboboxes()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to delete item:\n{e}")
+                QMessageBox.critical(self, "Error", f"Failed to delete connection:\n{e}")
 
     def refresh_all_comboboxes(self):
         for i in range(self.tab_widget.count()):
             tab = self.tab_widget.widget(i)
             combo_box = tab.findChild(QComboBox, "db_combo_box")
             if combo_box:
-                self.load_joined_items(combo_box)
+                self.load_joined_connections(combo_box)
 
-    def load_joined_items(self, combo_box):
+    def load_joined_connections(self, combo_box):
         try:
             current_data = combo_box.currentData()
             combo_box.clear()
-            all_items = db.get_all_connections_from_db()
-            for item in all_items:
+            connections = db.get_all_connections_from_db()
+            for connection in connections:
                 # The data for the combobox is now the full connection dictionary
-                conn_data = {key: item[key] for key in item if key != 'display_name'}
-                combo_box.addItem(item["display_name"], conn_data)
+                conn_data = {key: connection[key] for key in connection if key != 'display_name'}
+                combo_box.addItem(connection["display_name"], conn_data)
 
             if current_data:
                 for i in range(combo_box.count()):
@@ -1819,7 +1819,7 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(self, "Remove History", "Are you sure you want to remove the selected query history?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                db.delete_history_item(history_id)
+                db.delete_history(history_id)
                 self.load_connection_history(target_tab) # Refresh the view
                 target_tab.findChild(QTextEdit, "history_details_view").clear()
             except Exception as e:
@@ -1837,7 +1837,7 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(self, "Remove All History", f"Are you sure you want to remove all history for the connection:\n'{conn_name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                db.delete_all_history_for_connection(conn_id)
+                db.delete_all_history(conn_id)
                 self.load_connection_history(target_tab)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to clear history for this connection:\n{e}")
