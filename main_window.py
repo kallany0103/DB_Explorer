@@ -1,5 +1,4 @@
 # main_window.py
-
 import sys
 import os
 import time
@@ -21,512 +20,11 @@ from PyQt6.QtGui import QAction, QIcon, QStandardItemModel, QStandardItem, QFont
 from PyQt6.QtCore import Qt, QDir, QModelIndex, QSize, QObject, pyqtSignal, QRunnable, QThreadPool, QTimer, QUrl
 from dialogs.postgres_dialog import PostgresConnectionDialog
 from dialogs.sqlite_dialog import SQLiteConnectionDialog
-import db
+from dialogs.export_dialog import ExportDialog
+from workers import RunnableExport, RunnableExportFromModel, RunnableQuery, ProcessSignals, QuerySignals
+from notification_manager import NotificationManager
 from code_editor import CodeEditor
-
-
-class ExportDialog(QDialog):
-    def __init__(self, parent=None, default_filename="export.csv"):
-        super().__init__(parent)
-        self.setWindowTitle("Export Data")
-        self.setMinimumWidth(550)
-        main_layout = QVBoxLayout(self)
-        tab_widget = QTabWidget()
-        main_layout.addWidget(tab_widget)
-        general_tab = QWidget()
-        options_tab = QWidget()
-        tab_widget.addTab(general_tab, "General")
-        tab_widget.addTab(options_tab, "Options")
-        general_layout = QFormLayout(general_tab)
-        general_layout.addRow("Action:", QLabel("Export"))
-        self.filename_edit = QLineEdit(default_filename)
-        browse_btn = QPushButton()
-        browse_btn.setIcon(self.style().standardIcon(
-            QStyle.StandardPixmap.SP_DirOpenIcon))
-        browse_btn.setFixedSize(30, 25)
-        browse_btn.clicked.connect(self.browse_file)
-        filename_layout = QHBoxLayout()
-        filename_layout.addWidget(self.filename_edit)
-        filename_layout.addWidget(browse_btn)
-        general_layout.addRow("Filename:", filename_layout)
-        self.format_combo = QComboBox()
-        self.format_combo.addItems(["csv", "xlsx"])
-        self.format_combo.setCurrentText("csv")
-        self.format_combo.currentTextChanged.connect(self.on_format_change)
-        general_layout.addRow("Format:", self.format_combo)
-        self.encoding_combo = QComboBox()
-        self.encoding_combo.addItems(['UTF-8', 'LATIN1', 'windows-1252'])
-        self.encoding_combo.setEditable(True)
-        general_layout.addRow("Encoding:", self.encoding_combo)
-        options_layout = QFormLayout(options_tab)
-        self.options_layout = options_layout
-        self.header_check = QCheckBox("Header")
-        self.header_check.setChecked(True)
-        options_layout.addRow("Options:", self.header_check)
-        self.delimiter_label = QLabel("Delimiter:")
-        self.delimiter_combo = QComboBox()
-        self.delimiter_combo.addItems([',', ';', '|', '\\t'])
-        self.delimiter_combo.setEditable(True)
-        self.quote_label = QLabel("Quote character:")
-        self.quote_edit = QLineEdit('"')
-        self.quote_edit.setMaxLength(1)
-        options_layout.addRow(self.delimiter_label, self.delimiter_combo)
-        options_layout.addRow(self.quote_label, self.quote_edit)
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        main_layout.addWidget(button_box)
-        self.on_format_change(self.format_combo.currentText())
-
-    def on_format_change(self, format_text):
-        is_csv = (format_text == 'csv')
-        self.encoding_combo.setEnabled(is_csv)
-        self.delimiter_label.setVisible(is_csv)
-        self.delimiter_combo.setVisible(is_csv)
-        self.quote_label.setVisible(is_csv)
-        self.quote_edit.setVisible(is_csv)
-        current_filename = self.filename_edit.text()
-        base_name, _ = os.path.splitext(current_filename)
-        self.filename_edit.setText(f"{base_name}.{format_text}")
-
-    def browse_file(self):
-        file_filter = "CSV Files (*.csv);;Excel Files (*.xlsx);;All Files (*)"
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Select Output File", self.filename_edit.text(), file_filter)
-        if path:
-            self.filename_edit.setText(path)
-
-    
-    def get_options(self):
-        delimiter = self.delimiter_combo.currentText()
-        if delimiter == '\\t':
-          delimiter = '\t'
-        return {
-           "filename": self.filename_edit.text(),
-           "format": self.format_combo.currentText(),   # <<< ADD THIS
-           "encoding": self.encoding_combo.currentText(),
-           "header": self.header_check.isChecked(),
-           "delimiter": delimiter,
-           "quote": self.quote_edit.text()
-       }
-
-
-
-# --- Signals class for QRunnable worker ---
-# class QuerySignals(QObject):
-#     finished = pyqtSignal(dict, str, list, list, int, float, bool)
-#     error = pyqtSignal(str)
-
-
-
-class ProcessSignals(QObject):
-    started = pyqtSignal(str, dict)
-    finished = pyqtSignal(str, str, float)
-    error = pyqtSignal(str, str)
-
-
-# class RunnableExport(QRunnable):
-#     def __init__(self, process_id, item_data, table_name, export_options, signals):
-#         super().__init__()
-#         self.process_id = process_id
-#         self.item_data = item_data
-#         self.table_name = table_name
-#         self.export_options = export_options
-#         self.signals = signals
-
-#     def run(self):
-#         start_time = time.time()
-#         conn = None
-#         try:
-#             conn_data = self.item_data['conn_data']
-#             db_type = self.item_data.get('db_type')
-#             if db_type == 'sqlite':
-#                 conn = db.create_sqlite_connection(conn_data["db_path"])
-#                 query = f'SELECT * FROM "{self.table_name}"'
-#             elif db_type == 'postgres':
-#                 conn = db.create_postgres_connection(
-#                     host=conn_data["host"], database=conn_data["database"], user=conn_data["user"], password=conn_data["password"], port=int(conn_data["port"]))
-#                 schema_name = self.item_data.get("schema_name")
-#                 query = f'SELECT * FROM "{schema_name}"."{self.table_name}"'
-#             else:
-#                 raise ValueError("Unsupported database type for export.")
-#             if not conn:
-#                 raise ConnectionError(
-#                     "Failed to connect to the database for export.")
-#             df = pd.read_sql_query(query, conn)
-#             file_path, file_format = self.export_options['filename'], self.export_options['format']
-#             if file_format == 'xlsx':
-#                 df.to_excel(file_path, index=False,
-#                             header=self.export_options['header'])
-#             else:
-#                 df.to_csv(file_path, index=False, header=self.export_options['header'], sep=self.export_options[
-#                           'delimiter'], encoding=self.export_options['encoding'], quotechar=self.export_options['quote'])
-#             time_taken = time.time() - start_time
-#             success_message = f"Successfully exported {len(df)} rows to {os.path.basename(file_path)}"
-#             self.signals.finished.emit(
-#                 self.process_id, success_message, time_taken)
-#         except Exception as e:
-#             error_msg = f"An error occurred during export: {e}"
-#             print(error_msg)   # ✅ Print to console for debugging
-#             import traceback
-#             traceback.print_exc()   # ✅ Show full error stack
-#             self.signals.error.emit(self.process_id, error_msg)
-
-#         finally:
-#             if conn:
-#                 conn.close()
-
-class RunnableExport(QRunnable):
-    def __init__(self, process_id, item_data, table_name, export_options, signals):
-        super().__init__()
-        self.process_id = process_id
-        self.item_data = item_data
-        self.table_name = table_name
-        self.export_options = export_options
-        self.signals = signals
-
-    def run(self):
-        start_time = time.time()
-        conn = None
-        try:
-            # Step 1: Database connection and query setup 
-            conn_data = self.item_data['conn_data']
-            db_type = self.item_data.get('db_type')
-            
-            if db_type == 'sqlite':
-                conn = db.create_sqlite_connection(conn_data["db_path"])
-                query = f'SELECT * FROM "{self.table_name}"'
-            elif db_type == 'postgres':
-                conn = db.create_postgres_connection(
-                    host=conn_data["host"], database=conn_data["database"], user=conn_data["user"], password=conn_data["password"], port=int(conn_data["port"]))
-                schema_name = self.item_data.get("schema_name")
-                query = f'SELECT * FROM "{schema_name}"."{self.table_name}"'
-            else:
-                raise ValueError("Unsupported database type for export.")
-            
-            if not conn:
-                raise ConnectionError("Failed to connect to the database for export.")
-
-            # Step 2: Manually create DataFrame 
-            cursor = conn.cursor()
-            cursor.execute(query)
-            
-            # get column name
-            headers = [desc[0] for desc in cursor.description]
-            
-            # fetches all rows from the execute query result
-            data = cursor.fetchall()
-            
-            # DataFrame 
-            df = pd.DataFrame(data, columns=headers)
-            
-            
-            file_path = self.export_options['filename']
-            file_format = self.export_options['format']
-            if file_format == 'xlsx':
-                df.to_excel(file_path, index=False,
-                            header=self.export_options['header'])
-            else:
-                df.to_csv(file_path, index=False, header=self.export_options['header'], sep=self.export_options[
-                          'delimiter'], encoding=self.export_options['encoding'], quotechar=self.export_options['quote'])
-            
-            time_taken = time.time() - start_time
-            success_message = f"Successfully exported {len(df)} rows to {os.path.basename(file_path)}"
-            self.signals.finished.emit(
-                self.process_id, success_message, time_taken)
-                
-        except Exception as e:
-            error_msg = f"An error occurred during export: {e}"
-            print(error_msg)
-            import traceback
-            traceback.print_exc()
-            self.signals.error.emit(self.process_id, error_msg)
-
-        finally:
-            if conn:
-                conn.close()
-
-
-
-# class RunnableExport(QRunnable):
-#     def _init_(self, process_id, item_data, table_name, export_options, signals):
-#         super()._init_()
-#         self.process_id = process_id
-#         self.item_data = item_data
-#         self.table_name = table_name
-#         self.export_options = export_options
-#         self.signals = signals
-
-#     def run(self):
-#         start_time = time.time()
-#         conn = None
-#         try:
-#             # Step 1: Database connection and query setup 
-#             conn_data = self.item_data['conn_data']
-#             db_type = self.item_data.get('db_type')
-            
-#             if db_type == 'sqlite':
-#                 conn = db.create_sqlite_connection(conn_data["db_path"])
-#                 query = f'SELECT * FROM "{self.table_name}"'
-#             elif db_type == 'postgres':
-#                 conn = db.create_postgres_connection(
-#                     host=conn_data["host"], database=conn_data["database"], user=conn_data["user"], password=conn_data["password"], port=int(conn_data["port"]))
-#                 schema_name = self.item_data.get("schema_name")
-#                 query = f'SELECT * FROM "{schema_name}"."{self.table_name}"'
-#             else:
-#                 raise ValueError("Unsupported database type for export.")
-            
-#             if not conn:
-#                 raise ConnectionError("Failed to connect to the database for export.")
-
-#             # Step 2: Manually create DataFrame 
-#             cursor = conn.cursor()
-#             cursor.execute(query)
-            
-#             # get column name
-#             headers = [desc[0] for desc in cursor.description]
-            
-#             # fetches all rows from the execute query result
-#             data = cursor.fetchall()
-            
-#             # DataFrame 
-#             df = pd.DataFrame(data, columns=headers)
-            
-            
-#             file_path = self.export_options['filename']
-#             file_format = self.export_options['format']
-#             if file_format == 'xlsx':
-#                 df.to_excel(file_path, index=False,
-#                             header=self.export_options['header'])
-#             else:
-#                 df.to_csv(file_path, index=False, header=self.export_options['header'], sep=self.export_options[
-#                           'delimiter'], encoding=self.export_options['encoding'], quotechar=self.export_options['quote'])
-            
-#             time_taken = time.time() - start_time
-#             success_message = f"Successfully exported {len(df)} rows to {os.path.basename(file_path)}"
-#             self.signals.finished.emit(
-#                 self.process_id, success_message, time_taken)
-                
-#         except Exception as e:
-#             error_msg = f"An error occurred during export: {e}"
-#             print(error_msg)
-#             import traceback
-#             traceback.print_exc()
-#             self.signals.error.emit(self.process_id, error_msg)
-
-#         finally:
-#             if conn:
-#                 conn.close()
-
-
-class RunnableExportFromModel(QRunnable):
-    def __init__(self, process_id, model, export_options, signals):
-        super().__init__()
-        self.process_id = process_id
-        self.model = model
-        self.export_options = export_options
-        self.signals = signals
-
-    def run(self):
-        start_time = time.time()
-        try:
-            rows, cols = self.model.rowCount(), self.model.columnCount()
-            headers = [self.model.headerData(c, Qt.Orientation.Horizontal) for c in range(cols)]
-            data = []
-            for r in range(rows):
-                row_data = []
-                for c in range(cols):
-                    index = self.model.index(r, c)
-                    row_data.append(self.model.data(index))
-                data.append(row_data)
-            df = pd.DataFrame(data, columns=headers)
-
-            file_path = self.export_options['filename']
-            file_format = os.path.splitext(file_path)[1].lower()
-
-            if file_format == ".xlsx":
-                df.to_excel(file_path, index=False, header=self.export_options['header'])
-            else:
-                df.to_csv(
-                    file_path,
-                    index=False,
-                    header=self.export_options['header'],
-                    sep=self.export_options['delimiter'],
-                    encoding=self.export_options['encoding'],
-                    quotechar=self.export_options['quote']
-                )
-
-            time_taken = time.time() - start_time
-            msg = f"Exported {len(df)} rows to {os.path.basename(file_path)}"
-            self.signals.finished.emit(self.process_id, msg, time_taken)
-        except Exception as e:
-            self.signals.error.emit(self.process_id, str(e))
-
-
-class QuerySignals(QObject):
-    finished = pyqtSignal(dict, str, list, list, int, float, bool)  
-    # conn_data, query, results, columns, row_count, elapsed_time, is_select_query
-
-    error = pyqtSignal(dict, str, int, float, str)  
-    # conn_data, query, row_count, elapsed_time, error_message
-
-
-
-# --- Worker now inherits from QRunnable for use with QThreadPool ---
-class RunnableQuery(QRunnable):
-    def __init__(self, conn_data, query, signals):
-        super().__init__()
-        self.conn_data = conn_data
-        self.query = query
-        self.signals = signals
-        self._is_cancelled = False
-
-    def cancel(self):
-        self._is_cancelled = True
-
-    def run(self):
-        conn = None
-        try:
-            start_time = time.time()
-            if not self.conn_data:
-                raise ConnectionError("Incomplete connection information.")
-
-            if "db_path" in self.conn_data and self.conn_data["db_path"]:
-                conn = db.create_sqlite_connection(self.conn_data["db_path"])
-            else:
-                conn = db.create_postgres_connection(
-                    host=self.conn_data["host"], database=self.conn_data["database"],
-                    user=self.conn_data["user"], password=self.conn_data["password"],
-                    port=int(self.conn_data["port"])
-                )
-            
-            if not conn:
-                raise ConnectionError("Failed to establish database connection.")
-
-            cursor = conn.cursor()
-            cursor.execute(self.query)
-
-            if self._is_cancelled:
-                conn.close()
-                return
-
-            row_count = 0
-            is_select_query = self.query.lower().strip().startswith("select")
-            results = []
-            columns = []
-
-            if is_select_query:
-                if cursor.description:
-                    columns = [desc[0] for desc in cursor.description]
-                    if not self._is_cancelled:
-                        results = cursor.fetchall()
-                        row_count = len(results)
-                else:
-                    row_count = 0
-            else:
-                conn.commit()
-                row_count = cursor.rowcount if cursor.rowcount != -1 else 0
-
-            if self._is_cancelled:
-                conn.close()
-                return
-
-            elapsed_time = time.time() - start_time
-            self.signals.finished.emit(
-                self.conn_data, self.query, results, columns, row_count, elapsed_time, is_select_query)
-
-        except Exception as e:
-            # if not self._is_cancelled:
-            #     self.signals.error.emit(str(e))
-            if not self._is_cancelled:
-                elapsed_time = time.time() - start_time if 'start_time' in locals() else 0
-                self.signals.error.emit(self.conn_data, self.query, 0, elapsed_time, str(e) )
-        finally:
-            if conn:
-                conn.close()
-
-
-
-class NotificationWidget(QWidget):
-    closed = pyqtSignal(QWidget)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | Qt.WindowType.ToolTip
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setObjectName("notificationWidget")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(10)
-        self.icon_label = QLabel()
-        self.message_label = QLabel()
-        self.close_button = QPushButton("✕")
-        self.close_button.setObjectName("notificationCloseButton")
-        self.close_button.setFixedSize(20, 20)
-        self.close_button.clicked.connect(self.close_widget)
-        layout.addWidget(self.icon_label)
-        layout.addWidget(self.message_label)
-        layout.addStretch()
-        layout.addWidget(self.close_button)
-
-    def show_message(self, message, is_error=False):
-        self.message_label.setText(message)
-        if is_error:
-            self.setProperty("isError", True)
-            icon = self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxCritical)
-        else:
-            self.setProperty("isError", False)
-            icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)
-        self.icon_label.setPixmap(icon.pixmap(16, 16))
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self.adjustSize()
-        self.show()
-
-    def close_widget(self):
-        self.closed.emit(self)
-        self.close()
-
-
-
-class NotificationManager:
-    def __init__(self, parent_widget):
-        self.parent = parent_widget
-        self.notifications = []
-        self.spacing = 10
-        self.margin = 15
-
-    def show_message(self, message, is_error=False):
-        notification = NotificationWidget(self.parent)
-        notification.closed.connect(self.on_notification_closed)
-        self.notifications.insert(0, notification)
-        notification.show_message(message, is_error)
-        self.reposition_notifications()
-
-    def on_notification_closed(self, notification_widget):
-        try:
-            self.notifications.remove(notification_widget)
-        except ValueError:
-            pass
-        self.reposition_notifications()
-
-    def reposition_notifications(self):
-        if not self.parent:
-            return
-        parent_rect = self.parent.geometry()
-        status_bar_height = 0
-        if hasattr(self.parent, 'statusBar') and self.parent.statusBar():
-            status_bar_height = self.parent.statusBar().height()
-        y = parent_rect.height() - status_bar_height - self.margin
-        for notification in self.notifications:
-            y -= notification.height()
-            x = parent_rect.width() - notification.width() - self.margin
-            notification.move(x, y)
-            y -= self.spacing
-
+import db
 
 class MainWindow(QMainWindow):
     QUERY_TIMEOUT = 60000
@@ -777,15 +275,13 @@ class MainWindow(QMainWindow):
          active = self.thread_pool.activeThreadCount()
          max_threads = self.thread_pool.maxThreadCount()
          self.status.showMessage(f"ThreadPool: {active} active of {max_threads}", 3000)
-
-    
+   
 
     def _apply_styles(self):
         primary_color, header_color, selection_color = "#D3D3D3", "#A9A9A9", "#A9A9A9"
         text_color_on_primary, alternate_row_color, border_color = "#000000", "#f0f0f0", "#A9A9A9"
         self.setStyleSheet(f"""QMainWindow, QToolBar, QStatusBar {{ background-color: {primary_color}; color: {text_color_on_primary}; }} QTreeView {{ background-color: white; alternate-background-color: {alternate_row_color}; border: 1px solid {border_color}; }} QTableView {{ alternate-background-color: {alternate_row_color}; background-color: white; gridline-color: #a9a9a9; border: 1px solid {border_color}; font-family: Arial, sans-serif; font-size: 9pt;}} QTableView::item {{ padding: 4px; }} QTableView::item:selected {{ background-color: {selection_color}; color: white; }} QHeaderView::section {{ background-color: {header_color}; color: white; padding: 4px; border: none; border-right: 1px solid #d3d3d3; border-bottom: 1px solid {border_color}; font-weight: bold; font-size: 9pt;  }} QTableView QTableCornerButton::section {{ background-color: {header_color}; border: 1px solid {border_color}; }} #resultsHeader QPushButton, #editorHeader QPushButton {{ background-color: #ffffff; border: 1px solid {border_color}; padding: 5px 15px; font-size: 9pt; }} #resultsHeader QPushButton:hover, #editorHeader QPushButton:hover {{ background-color: {primary_color}; }} #resultsHeader QPushButton:checked, #editorHeader QPushButton:checked {{ background-color: {selection_color}; border-bottom: 1px solid {selection_color}; font-weight: bold; color: white; }} #resultsHeader, #editorHeader {{ background-color: {alternate_row_color}; padding-bottom: -1px; }} #messageView, #history_details_view, QTextEdit {{ font-family: Consolas, monospace; font-size: 10pt; background-color: white; border: 1px solid {border_color}; }} #tab_status_label {{ padding: 3px 5px; background-color: {alternate_row_color}; border-top: 1px solid {border_color}; }} QGroupBox {{ font-size: 9pt; font-weight: bold; color: {text_color_on_primary}; }} QTabWidget::pane {{ border-top: 1px solid {border_color}; }} QTabBar::tab {{ background: #E0E0E0; border: 1px solid {border_color}; padding: 5px 10px; border-bottom: none; }} QTabBar::tab:selected {{ background: {selection_color}; color: white; }} QComboBox {{ border: 1px solid {border_color}; padding: 2px; background-color: white; }}""")
     
-
     
     def add_tab(self):
         tab_content = QWidget(self.tab_widget)
@@ -1023,7 +519,6 @@ class MainWindow(QMainWindow):
         return tab_content
 
 
-
     def close_tab(self, index):
         tab = self.tab_widget.widget(index)
         if tab in self.running_queries:
@@ -1063,22 +558,7 @@ class MainWindow(QMainWindow):
                 connection_type_item.appendRow(connection_group_item)
             self.model.appendRow(connection_type_item)
 
-    # def item_clicked(self, index):
-    #     item = self.model.itemFromIndex(index)
-    #     depth = self.get_item_depth(item)
-    #     self.schema_model.clear()
-    #     self.schema_model.setHorizontalHeaderLabels(["Database Schema"])
-    #     if depth == 3:
-    #         conn_data = item.data(Qt.ItemDataRole.UserRole)
-    #         if conn_data:
-    #             if conn_data.get("host"):
-    #                 self.status.showMessage(f"Loading schema for {conn_data.get('name')}...", 3000)
-    #                 self.load_postgres_schema(conn_data)
-    #             elif conn_data.get("db_path"):
-    #                 self.status.showMessage(f"Loading schema for {conn_data.get('name')}...", 3000)
-    #                 self.load_sqlite_schema(conn_data)
-
-
+    
     def item_clicked(self, index):
         item = self.model.itemFromIndex(index)
         depth = self.get_item_depth(item)
@@ -1393,70 +873,6 @@ class MainWindow(QMainWindow):
         elapsed = time.time() - self.tab_timers[tab]["start_time"]
         label.setText(f"Running... {elapsed:.1f} sec")
 
-    # def handle_query_result(self, target_tab, conn_data, query, results, columns, row_count, elapsed_time, is_select_query):
-    #   # Stop timers
-    #   if target_tab in self.tab_timers:
-    #      self.tab_timers[target_tab]["timer"].stop()
-    #      self.tab_timers[target_tab]["timeout_timer"].stop()
-    #      del self.tab_timers[target_tab]
-
-    #   self.save_query_to_history(
-    #         conn_data, query, "Success", row_count, elapsed_time)
-
-    #   # Update table and message view
-    #   table_view = target_tab.findChild(QTableView, "result_table")
-    #   message_view = target_tab.findChild(QTextEdit, "message_view")
-    #   tab_status_label = target_tab.findChild(QLabel, "tab_status_label")
-
-    #   if is_select_query:
-    #       model = QStandardItemModel()
-    #       model.setHorizontalHeaderLabels(columns)
-    #       for row in results:
-    #           model.appendRow([QStandardItem(str(cell)) for cell in row])
-    #       table_view.setModel(model)
-    #       msg = f"Query executed successfully.\n\nTotal rows: {row_count}\nTime: {elapsed_time:.2f} sec"
-    #       status = f"Query executed successfully | Total rows: {row_count} | Time: {elapsed_time:.2f} sec"
-    #   else:
-    #       table_view.setModel(QStandardItemModel())
-    #       msg = f"Command executed successfully.\n\nRows affected: {row_count}\nTime: {elapsed_time:.2f} sec"
-    #       status = f"Command executed successfully | Rows affected: {row_count} | Time: {elapsed_time:.2f} sec"
-
-    # #   if message_view:
-    # #       message_view.setText(msg)
-
-    #   if message_view:
-    #     # Append new message with a separator
-    #     # message_view.toPlainText() gets the current text.
-    #     # append() adds new text at the end instead of replacing it.
-    #     # "-"*50 adds a visual separator between queries (optional but useful).
-    #     previous_text = message_view.toPlainText()
-    #     if previous_text:
-    #        message_view.append("\n" + "-"*50 + "\n")  # Optional separator
-    #     message_view.append(msg)
-
-    #   if tab_status_label:
-    #       tab_status_label.setText(status)
-
-    #   self.status_message_label.setText("Ready")
-
-    #   # Stop spinner
-    #   spinner_label = target_tab.findChild(QLabel, "spinner_label")
-    #   if spinner_label and spinner_label.movie():
-    #       spinner_label.movie().stop()
-    #       spinner_label.hide()
-
-
-    #   # Show output results view (index 0)
-    #   results_stack = target_tab.findChild(QStackedWidget, "results_stacked_widget")
-    #   if results_stack:
-    #      results_stack.setCurrentIndex(0)
-
-    #   # Cleanup running queries
-    #   if target_tab in self.running_queries:
-    #       del self.running_queries[target_tab]
-    #   if not self.running_queries:
-    #       self.cancel_action.setEnabled(False)
-
 
     def handle_query_result(self, target_tab, conn_data, query, results, columns, row_count, elapsed_time, is_select_query):
       # Stop timers
@@ -1560,8 +976,6 @@ class MainWindow(QMainWindow):
       if not self.running_queries:
         self.cancel_action.setEnabled(False)
 
-
-
     def get_table_column_metadata(self, conn_data, table_name):
       """
         Returns a list of column headers with pgAdmin-style info like:
@@ -1613,25 +1027,6 @@ class MainWindow(QMainWindow):
             conn.close()
       return headers
 
-    
-
-    # def handle_query_error(self, target_tab, error_message):
-    #     if target_tab in self.tab_timers:
-    #         self.tab_timers[target_tab]["timer"].stop()
-    #         self.tab_timers[target_tab]["timeout_timer"].stop()
-    #         del self.tab_timers[target_tab]
-    #     message_view = target_tab.findChild(QTextEdit, "message_view")
-    #     tab_status_label = target_tab.findChild(QLabel, "tab_status_label")
-    #     error_text = f"Error: {error_message}"
-    #     message_view.setText(f"Error:\n\n{error_message}")
-    #     tab_status_label.setText(error_text)
-    #     self.status_message_label.setText("Error occurred")
-    #     self.stop_spinner(target_tab, success=False)
-    #     if target_tab in self.running_queries:
-    #         del self.running_queries[target_tab]
-    #     if not self.running_queries:
-    #         self.cancel_action.setEnabled(False)
-
     def show_error_popup(self, error_text, parent=None):
         msg_box = QMessageBox(parent)
         msg_box.setWindowTitle("Query Error")
@@ -1640,7 +1035,6 @@ class MainWindow(QMainWindow):
         msg_box.setInformativeText(error_text)  # detailed error
         msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg_box.exec()
-
 
     def handle_query_error(self, current_tab, conn_data, query, row_count, elapsed_time, error_message):
         if current_tab in self.tab_timers:
@@ -1675,7 +1069,6 @@ class MainWindow(QMainWindow):
         if not self.running_queries:
             self.cancel_action.setEnabled(False)
 
-
     def stop_spinner(self, target_tab, success=True):
         if not target_tab: return
         stacked_widget = target_tab.findChild(QStackedWidget, "results_stacked_widget")
@@ -1700,7 +1093,6 @@ class MainWindow(QMainWindow):
                     buttons[2].setChecked(False)
                     buttons[3].setChecked(False)
     
-
 
     def handle_query_timeout(self, tab, runnable):
         if self.running_queries.get(tab) is runnable:
@@ -1842,11 +1234,6 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to clear history for this connection:\n{e}")
 
-
-
-    
-    
-
     # --- Schema Loading Methods ---
     def load_sqlite_schema(self, conn_data):
         self.schema_model.clear()
@@ -1872,8 +1259,7 @@ class MainWindow(QMainWindow):
                 except TypeError: pass
         except Exception as e:
             self.status.showMessage(f"Error loading SQLite schema: {e}", 5000)
-
-    
+   
     def load_sqlite_schema(self, conn_data):
         self.schema_model.clear()
         self.schema_model.setHorizontalHeaderLabels(["Name", "Type"])
@@ -1929,11 +1315,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.status.showMessage(f"Error loading SQLite schema: {e}", 5000)
 
-
-
     def load_postgres_schema(self, conn_data):
         try:
-            
             self.schema_model.clear()
             self.schema_model.setHorizontalHeaderLabels(["Name", "Type"])
             self.pg_conn = psycopg2.connect(host=conn_data["host"], database=conn_data["database"],
@@ -1984,106 +1367,6 @@ class MainWindow(QMainWindow):
     }
 """)
 
-    # def show_schema_context_menu(self, position):
-    #     index = self.schema_tree.indexAt(position)
-    #     if not index.isValid():
-    #         return
-
-    #     item = self.schema_model.itemFromIndex(index)
-    #     item_data = item.data(Qt.ItemDataRole.UserRole)
-
-    #     is_sqlite_table = item_data and item_data.get('db_type') == 'sqlite'
-    #     is_postgres_table = item_data and item.parent(
-    #     ) and item_data.get('db_type') == 'postgres'
-
-    #     if not (is_sqlite_table or is_postgres_table):
-    #         return
-
-    #     table_name = item.text()
-    #     menu = QMenu()
-
-    #     view_menu = menu.addMenu("View/Edit Data")
-
-    #     query_all_action = QAction("Query all rows from Table", self)
-    #     query_all_action.triggered.connect(
-    #         lambda: self.query_table_rows(item_data, table_name, limit=None, execute_now=True))
-    #     view_menu.addAction(query_all_action)
-
-    #     preview_100_action = QAction("Preview first 100 rows", self)
-    #     preview_100_action.triggered.connect(
-    #         lambda: self.query_table_rows(item_data, table_name, limit=100, execute_now=True))
-    #     view_menu.addAction(preview_100_action)
-
-    #     last_100_action = QAction("Show last 100 rows", self)
-    #     last_100_action.triggered.connect(
-    #         lambda: self.query_table_rows(item_data, table_name, limit=100, order='desc', execute_now=True))
-    #     view_menu.addAction(last_100_action)
-
-    #     query_tool_action = QAction("Query Tool", self)
-    #     query_tool_action.triggered.connect(
-    #         lambda: self.open_query_tool_for_table(item_data, table_name))
-    #     menu.addAction(query_tool_action)
-
-    #     export_rows_action = QAction("Export Rows", self)
-    #     export_rows_action.triggered.connect(
-    #         lambda: self.export_schema_table_rows(item_data, table_name))
-    #     menu.addAction(export_rows_action)
-
-    #     menu.exec(self.schema_tree.viewport().mapToGlobal(position))
-
-    # def show_schema_context_menu(self, position):
-    #     index = self.schema_tree.indexAt(position)
-    #     if not index.isValid():
-    #         return
- 
-    #     item = self.schema_model.itemFromIndex(index)
-    #     item_data = item.data(Qt.ItemDataRole.UserRole)
-
-    #     if not item_data:
-    #         return
-
-    #     db_type = item_data.get("db_type")
-    #     if db_type not in ("sqlite", "postgres"):
-    #         return
-
-    #     table_name = item.text()
-    #     menu = QMenu()
-
-    #     view_menu = menu.addMenu("View/Edit Data")
-
-    #     query_all_action = QAction("Query all rows from Table", self)
-    #     query_all_action.triggered.connect(
-    #         lambda: self.query_table_rows(item_data, table_name, limit=None, execute_now=True))
-    #     view_menu.addAction(query_all_action)
-
-    #     preview_100_action = QAction("Preview first 100 rows", self)
-    #     preview_100_action.triggered.connect(
-    #         lambda: self.query_table_rows(item_data, table_name, limit=100, execute_now=True))
-    #     view_menu.addAction(preview_100_action)
-
-    #     last_100_action = QAction("Show last 100 rows", self)
-    #     last_100_action.triggered.connect(
-    #         lambda: self.query_table_rows(item_data, table_name, limit=100, order='desc', execute_now=True))
-    #     view_menu.addAction(last_100_action)
-  
-    #     query_tool_action = QAction("Query Tool", self)
-    #     query_tool_action.triggered.connect(
-    #         lambda: self.open_query_tool_for_table(item_data, table_name))
-    #     menu.addAction(query_tool_action)
-
-    #     export_rows_action = QAction("Export Rows", self)
-    #     export_rows_action.triggered.connect(
-    #         lambda: self.export_schema_table_rows(item_data, table_name))
-    #     menu.addAction(export_rows_action)
-
-    #     properties_action = QAction("Properties", self)
-    #     properties_action.triggered.connect(
-    #         lambda: self.show_table_properties(item_data, table_name))
-    #     menu.addAction(properties_action)
-
-    #     menu.exec(self.schema_tree.viewport().mapToGlobal(position))
-
-
     def show_schema_context_menu(self, position):
         index = self.schema_tree.indexAt(position)
         if not index.isValid():
@@ -2133,7 +1416,6 @@ class MainWindow(QMainWindow):
         menu.addAction(properties_action)
         menu.exec(self.schema_tree.viewport().mapToGlobal(position))
 
-
     def show_table_properties(self, item_data, table_name):
         dialog = TablePropertiesDialog(item_data, table_name, self)
         dialog.exec()
@@ -2165,8 +1447,7 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(RunnableExport(
             process_id, item_data, table_name, options, signals))
         
-
-
+        
     def show_results_context_menu(self, position):
         results_table = self.sender()
         if not results_table or not results_table.model():
@@ -2179,8 +1460,7 @@ class MainWindow(QMainWindow):
 
         menu.exec(results_table.viewport().mapToGlobal(position))
 
-    
-    
+      
     def export_result_rows(self, table_view):
         model = table_view.model()
         if not model:
@@ -2232,8 +1512,7 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(
           RunnableExportFromModel(process_id, model, options, signals)
         )
-
-        
+     
 
     def _initialize_processes_model(self):
         self.processes_model = QStandardItemModel()
@@ -2296,7 +1575,6 @@ class MainWindow(QMainWindow):
         self.processes_model.setItem(row, 2, status_item)
         self.processes_model.item(row, 7).setText(error_message)
     
-
     def count_table_rows(self, item_data, table_name):
         if not item_data:
             return
@@ -2326,10 +1604,6 @@ class MainWindow(QMainWindow):
         self.notification_manager.show_message(
             f"Error: {error_message}", is_error=True)
         self.status_message_label.setText("Failed to count rows.")
-
-
-    # def open_query_tool_for_table(self, item_data, table_name):
-    #     self.query_table_rows(item_data, table_name, execute_now=False)
 
 
     def open_query_tool_for_table(self, item_data, table_name):

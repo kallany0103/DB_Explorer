@@ -9,7 +9,7 @@ class OracleConnectionDialog(QDialog):
     def __init__(self, parent=None, is_editing=False):
         super().__init__(parent)
         self.setWindowTitle("Edit Oracle Connection" if is_editing else "New Oracle Connection")
-
+        self.resize(500, 400)
         self.name_input = QLineEdit()
         self.user_input = QLineEdit()
         self.password_input = QLineEdit()

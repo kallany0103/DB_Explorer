@@ -1,3 +1,5 @@
+# code_editor
+
 from PyQt6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit
 from PyQt6.QtGui import QColor, QTextFormat, QFont, QPainter, QPolygon, QBrush
 from PyQt6.QtCore import QRect, QSize, Qt, QPoint
