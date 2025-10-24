@@ -1,3 +1,5 @@
+# table_properties
+
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTabWidget, QWidget, QTableWidget, QTableWidgetItem,
     QAbstractItemView, QHBoxLayout, QPushButton, QMessageBox, QInputDialog, QFormLayout, QLabel, QComboBox, QCheckBox, 
