@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QLabel, QGroupBox,QCheckBox,QStyle,QDialogButtonBox, QPlainTextEdit, QButtonGroup
 )
 from PyQt6.QtWidgets import QAbstractItemView
+from PyQt6.QtSql import QSqlDatabase, QSqlTableModel
 from PyQt6.QtGui import QAction, QIcon, QStandardItemModel, QStandardItem, QFont, QMovie, QDesktopServices, QColor, QBrush
 from PyQt6.QtCore import Qt, QDir, QModelIndex, QSize, QObject, pyqtSignal, QRunnable, QThreadPool, QTimer, QUrl
 from dialogs.postgres_dialog import PostgresConnectionDialog
@@ -36,7 +37,7 @@ class MainWindow(QMainWindow):
         self.thread_pool = QThreadPool.globalInstance()
         self.tab_timers = {}
         self.running_queries = {}
-        self._initialize_processes_model() # <<< MODIFIED >>> Initialize shared model
+        #self._initialize_processes_model() # <<< MODIFIED >>> Initialize shared model
 
         self._create_actions()
         self._create_menu()
@@ -293,6 +294,8 @@ class MainWindow(QMainWindow):
         db_combo_box.setObjectName("db_combo_box")
         layout.addWidget(db_combo_box)
         self.load_joined_connections(db_combo_box)
+        db_combo_box.currentIndexChanged.connect(lambda: self.refresh_processes_view())
+
 
         main_vertical_splitter = QSplitter(Qt.Orientation.Vertical)
         main_vertical_splitter.setObjectName("tab_vertical_splitter")
@@ -459,7 +462,7 @@ class MainWindow(QMainWindow):
         processes_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         processes_view.setAlternatingRowColors(True)
         processes_view.horizontalHeader().setStretchLastSection(True)
-        processes_view.setModel(self.processes_model)
+        #processes_view.setModel(self.processes_model)
         processes_view.setColumnWidth(0, 150)
         processes_view.setColumnWidth(1, 100)
         processes_view.setColumnWidth(2, 100)
@@ -516,6 +519,7 @@ class MainWindow(QMainWindow):
         )
         self.tab_widget.setCurrentIndex(index)
         self.renumber_tabs()
+        self._initialize_processes_model(tab_content)
         return tab_content
 
 
@@ -1493,7 +1497,7 @@ class MainWindow(QMainWindow):
         # --- Create Process info ---
         process_id = str(uuid.uuid4())
         initial_data = {
-           "pid": process_id[:8],
+           "pid": process_id,
            "type": "Export Data",
            "status": "Running",
            "server": conn_name,   # dynamically set
@@ -1514,66 +1518,326 @@ class MainWindow(QMainWindow):
         )
      
 
-    def _initialize_processes_model(self):
-        self.processes_model = QStandardItemModel()
-        self.processes_model.setHorizontalHeaderLabels(
-            ["PID", "Type", "Status", "Server", "Object", "Time Taken (sec)", "Start Time", "Details"])
+    # def _initialize_processes_model(self):
+    #     self.processes_model = QStandardItemModel()
+    #     self.processes_model.setHorizontalHeaderLabels(
+    #         ["PID", "Type", "Status", "Server", "Object", "Time Taken (sec)", "Start Time", "Details"])
+     
+    # def _initialize_processes_model(self):
+    #     current_tab = self.tab_widget.currentWidget()
+    #     if not current_tab:
+    #       return
 
+    #     processes_view = current_tab.findChild(QTableView, "processes_view")
+    #     if not processes_view:
+    #       return
+
+    #     self.processes_model = QStandardItemModel()
+    #     self.processes_model.setHorizontalHeaderLabels(
+    #       ["PID", "Type", "Status", "Server", "Object", "Time Taken (sec)", "Start Time", "End Time", "Details"]
+    #     )
+    #     processes_view.setModel(self.processes_model)
+    #     processes_view.resizeColumnsToContents()
         
+    # def switch_to_processes_view(self):
+    #     current_tab = self.tab_widget.currentWidget()
+    #     if not current_tab:
+    #         return
+
+    #     results_stack = current_tab.findChild(QStackedWidget, "results_stacked_widget")
+    #     header = current_tab.findChild(QWidget, "resultsHeader")
+    #     buttons = header.findChildren(QPushButton)
+        
+    #     if results_stack and len(buttons) >= 4:
+    #         results_stack.setCurrentIndex(3)
+    #         buttons[0].setChecked(False)
+    #         buttons[1].setChecked(False)
+    #         buttons[2].setChecked(False)
+    #         buttons[3].setChecked(True)
+    
+    
+    # def _initialize_processes_model(self, tab_content):
+    #     processes_view = tab_content.findChild(QTableView, "processes_view")
+    #     if not processes_view:
+    #         return
+
+    #     self.processes_model = QStandardItemModel()
+    #     self.processes_model.setHorizontalHeaderLabels(
+    #         ["PID", "Type", "Status", "Server", "Object", "Time Taken (sec)", "Start Time", "End Time", "Details"]
+    #     )
+    #     processes_view.setModel(self.processes_model)
+    #     processes_view.resizeColumnsToContents()
+    
+    def _initialize_processes_model(self, tab_content):
+        processes_view = tab_content.findChild(QTableView, "processes_view")
+        if not processes_view:
+          return
+
+        tab_content.processes_model = QStandardItemModel()
+        tab_content.processes_model.setHorizontalHeaderLabels(
+           ["PID", "Type", "Status", "Server", "Object", "Time Taken (sec)", "Start Time", "End Time", "Details"]
+       )
+        processes_view.setModel(tab_content.processes_model)
+        processes_view.resizeColumnsToContents()
+
+            
     def switch_to_processes_view(self):
         current_tab = self.tab_widget.currentWidget()
         if not current_tab:
-            return
+          return
 
         results_stack = current_tab.findChild(QStackedWidget, "results_stacked_widget")
         header = current_tab.findChild(QWidget, "resultsHeader")
         buttons = header.findChildren(QPushButton)
-        
-        if results_stack and len(buttons) >= 4:
-            results_stack.setCurrentIndex(3)
-            buttons[0].setChecked(False)
-            buttons[1].setChecked(False)
-            buttons[2].setChecked(False)
-            buttons[3].setChecked(True)
 
+        if results_stack and len(buttons) >= 4:
+          results_stack.setCurrentIndex(3)
+          for i, btn in enumerate(buttons[:4]):
+            btn.setChecked(i == 3)
+
+
+    # def handle_process_started(self, process_id, data):
+    #     self.switch_to_processes_view()
+    #     row_items = []
+    #     for key in ["pid", "type", "status", "server", "object", "time_taken", "start_time", "details"]:
+    #         item = QStandardItem(data[key])
+    #         if key == "pid":
+    #             item.setData(process_id, Qt.ItemDataRole.UserRole)
+    #         if key == "status":
+    #             item.setIcon(QIcon("assets/running_icon.png"))
+    #         row_items.append(item)
+    #     self.processes_model.appendRow(row_items)
+    
+    
+    def get_current_tab_processes_model(self):
+        current_tab = self.tab_widget.currentWidget()
+        if not current_tab:
+          return None, None
+        processes_view = current_tab.findChild(QTableView, "processes_view")
+        model = getattr(current_tab, "processes_model", None)
+        return model, processes_view
+
+    
+    # def handle_process_started(self, process_id, data):
+    #     self.switch_to_processes_view()
+
+    #     conn = sqlite.connect("databases/hierarchy.db")
+    #     cursor = conn.cursor()
+
+    #     cursor.execute("""
+    #       INSERT OR REPLACE INTO usf_processes
+    #       (pid, type, status, server, object, time_taken, start_time, end_time, details)
+    #       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    #   """, (
+    #       data.get("pid", ""),
+    #       data.get("type", ""),
+    #       "Running",
+    #       data.get("server", ""),
+    #       data.get("object", ""),
+    #       0.0,
+    #       datetime.datetime.now().strftime("%Y-%m-%d, %I:%M:%S %p"),
+    #       "",  # end_time initially empty
+    #       data.get("details", "")
+    #    ))
+    #     conn.commit()
+    #     conn.close()
+
+    #     self.refresh_processes_view()
+    
     def handle_process_started(self, process_id, data):
         self.switch_to_processes_view()
-        row_items = []
-        for key in ["pid", "type", "status", "server", "object", "time_taken", "start_time", "details"]:
-            item = QStandardItem(data[key])
-            if key == "pid":
-                item.setData(process_id, Qt.ItemDataRole.UserRole)
-            if key == "status":
-                item.setIcon(QIcon("assets/running_icon.png"))
-            row_items.append(item)
-        self.processes_model.appendRow(row_items)
 
-    def find_process_row(self, process_id):
-        for row in range(self.processes_model.rowCount()):
-            if self.processes_model.item(row, 0).data(Qt.ItemDataRole.UserRole) == process_id:
-                return row
-        return -1
+        conn = sqlite.connect("databases/hierarchy.db")
+        cursor = conn.cursor()
 
+        cursor.execute("""
+          INSERT OR REPLACE INTO usf_processes
+          (pid, type, status, server, object, time_taken, start_time, end_time, details)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      """, (
+          data.get("pid", ""),
+          data.get("type", ""),
+          "Running",
+          data.get("server", ""),
+          data.get("object", ""),
+          0.0,
+          datetime.datetime.now().strftime("%Y-%m-%d, %I:%M:%S %p"),
+          "",
+          data.get("details", "")
+      ))
+        conn.commit()
+        conn.close()
+
+        # এখানে আগের self.processes_model নয়
+        self.refresh_processes_view()
+
+
+    # def find_process_row(self, process_id):
+    #     for row in range(self.processes_model.rowCount()):
+    #         if self.processes_model.item(row, 0).data(Qt.ItemDataRole.UserRole) == process_id:
+    #             return row
+    #     return -1
+
+    # def handle_process_finished(self, process_id, message, time_taken):
+    #     row = self.find_process_row(process_id)
+    #     if row == -1:
+    #         return
+    #     status_item = QStandardItem("Finished")
+    #     status_item.setBackground(QBrush(QColor("#d4edda")))
+    #     status_item.setIcon(QIcon("assets/finished_icon.png"))
+    #     self.processes_model.setItem(row, 2, status_item)
+    #     self.processes_model.item(row, 5).setText(f"{time_taken:.2f}")
+    #     self.processes_model.item(row, 7).setText(message)
+
+    # def handle_process_error(self, process_id, error_message):
+    #     row = self.find_process_row(process_id)
+    #     if row == -1:
+    #         return
+    #     status_item = QStandardItem("Error")
+    #     status_item.setBackground(QBrush(QColor("#f8d7da")))
+    #     status_item.setIcon(QIcon("assets/error_icon.png"))
+    #     self.processes_model.setItem(row, 2, status_item)
+    #     self.processes_model.item(row, 7).setText(error_message)
+    
+    
     def handle_process_finished(self, process_id, message, time_taken):
-        row = self.find_process_row(process_id)
-        if row == -1:
-            return
-        status_item = QStandardItem("Finished")
-        status_item.setBackground(QBrush(QColor("#d4edda")))
-        status_item.setIcon(QIcon("assets/finished_icon.png"))
-        self.processes_model.setItem(row, 2, status_item)
-        self.processes_model.item(row, 5).setText(f"{time_taken:.2f}")
-        self.processes_model.item(row, 7).setText(message)
+        conn = sqlite.connect("databases/hierarchy.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+          UPDATE usf_processes
+          SET status = ?, time_taken = ?, end_time = ?, details = ?
+          WHERE pid = ?
+     """, (
+          "Finished",
+          time_taken,
+          datetime.datetime.now().strftime("%Y-%m-%d, %I:%M:%S %p"),
+          message,
+          process_id
+      ))
+        conn.commit()
+        conn.close()
+        self.refresh_processes_view()
 
     def handle_process_error(self, process_id, error_message):
-        row = self.find_process_row(process_id)
-        if row == -1:
-            return
-        status_item = QStandardItem("Error")
-        status_item.setBackground(QBrush(QColor("#f8d7da")))
-        status_item.setIcon(QIcon("assets/error_icon.png"))
-        self.processes_model.setItem(row, 2, status_item)
-        self.processes_model.item(row, 7).setText(error_message)
+        conn = sqlite.connect("databases/hierarchy.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+          UPDATE usf_processes
+          SET status = ?, end_time = ?, details = ?
+          WHERE pid = ?
+      """, (
+          "Error",
+          datetime.datetime.now().strftime("%Y-%m-%d, %I:%M:%S %p"),
+          error_message,
+          process_id
+      ))
+        conn.commit()
+        conn.close()
+        self.refresh_processes_view()
+
+        
+        
+    # def refresh_processes_view(self):
+    #     current_tab = self.tab_widget.currentWidget()
+    #     if not current_tab:
+    #       return
+
+    #     db_combo_box = current_tab.findChild(QComboBox, "db_combo_box")
+    #     selected_server = None
+    #     if db_combo_box:
+    #       index = db_combo_box.currentIndex()
+    #       if index >= 0:
+    #         data = db_combo_box.itemData(index)
+    #         selected_server = data.get("short_name") if data else db_combo_box.currentText()
+
+    #     processes_view = current_tab.findChild(QTableView, "processes_view")
+    #     if not processes_view:
+    #       return
+
+    #     conn = sqlite.connect("databases/hierarchy.db")
+    #     cursor = conn.cursor()
+
+    #     if selected_server:
+    #       cursor.execute("""
+    #         SELECT pid, type, status, server, object, time_taken, start_time, end_time, details
+    #         FROM usf_processes
+    #         WHERE server = ?
+    #         ORDER BY start_time DESC
+    #     """, (selected_server,))
+    #     else:
+    #       cursor.execute("""
+    #         SELECT pid, type, status, server, object, time_taken, start_time, end_time, details
+    #         FROM usf_processes
+    #         ORDER BY start_time DESC
+    #     """)
+
+    #     data = cursor.fetchall()
+    #     conn.close()
+
+    #     model = QStandardItemModel()
+    #     model.setHorizontalHeaderLabels(
+    #       ["PID", "Type", "Status", "Server", "Object", "Time Taken (sec)", "Start Time", "End Time", "Details"]
+    #    )
+
+    #     for row in data:
+    #       items = [QStandardItem(str(col)) for col in row]
+    #       model.appendRow(items)
+
+    #     processes_view.setModel(model)
+    #     processes_view.resizeColumnsToContents()
+    
+    
+    
+    def refresh_processes_view(self):
+        current_tab = self.tab_widget.currentWidget()
+        if not current_tab:
+          return
+
+        db_combo_box = current_tab.findChild(QComboBox, "db_combo_box")
+        selected_server = None
+        if db_combo_box:
+          index = db_combo_box.currentIndex()
+          if index >= 0:
+            data = db_combo_box.itemData(index)
+            selected_server = data.get("short_name") if data else db_combo_box.currentText()
+
+        processes_view = current_tab.findChild(QTableView, "processes_view")
+        model = getattr(current_tab, "processes_model", None)
+        if not processes_view or not model:
+          return
+
+        conn = sqlite.connect("databases/hierarchy.db")
+        cursor = conn.cursor()
+
+        if selected_server:
+          cursor.execute("""
+            SELECT pid, type, status, server, object, time_taken, start_time, end_time, details
+            FROM usf_processes
+            WHERE server = ?
+            ORDER BY start_time DESC
+        """, (selected_server,))
+        else:
+          cursor.execute("""
+            SELECT pid, type, status, server, object, time_taken, start_time, end_time, details
+            FROM usf_processes
+            ORDER BY start_time DESC
+          """)
+
+        data = cursor.fetchall()
+        conn.close()
+
+        model.clear()
+        model.setHorizontalHeaderLabels(
+          ["PID", "Type", "Status", "Server", "Object", "Time Taken (sec)", "Start Time", "End Time", "Details"]
+        )
+
+        for row in data:
+          items = [QStandardItem(str(col)) for col in row]
+          model.appendRow(items)
+
+        processes_view.setModel(model)
+        processes_view.resizeColumnsToContents()
+
     
     def count_table_rows(self, item_data, table_name):
         if not item_data:
@@ -1663,22 +1927,407 @@ class MainWindow(QMainWindow):
             self.execute_query()
 
 
+    # def load_tables_on_expand(self, index: QModelIndex):
+    #     item = self.schema_model.itemFromIndex(index)
+    #     if not item or (item.rowCount() > 0 and item.child(0).text() != "Loading..."):
+    #         return
+    #     item.removeRows(0, item.rowCount())
+    #     item_data = item.data(Qt.ItemDataRole.UserRole)
+    #     schema_name = item_data.get('schema_name')
+    #     try:
+    #         cursor = self.pg_conn.cursor()
+    #         cursor.execute("SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = %s ORDER BY table_type, table_name;", (schema_name,))
+    #         tables = cursor.fetchall()
+    #         for (table_name, table_type) in tables:
+    #             icon_path = "assets/table_icon.png" if "TABLE" in table_type else "assets/view_icon.png"
+    #             table_item = QStandardItem(QIcon(icon_path), table_name)
+    #             table_item.setEditable(False)
+    #             table_item.setData(item_data, Qt.ItemDataRole.UserRole)
+    #             item.appendRow(table_item)
+    #     except Exception as e:
+    #         self.status.showMessage(f"Error expanding schema: {e}", 5000)
+    
     def load_tables_on_expand(self, index: QModelIndex):
         item = self.schema_model.itemFromIndex(index)
+        
         if not item or (item.rowCount() > 0 and item.child(0).text() != "Loading..."):
             return
-        item.removeRows(0, item.rowCount())
+
         item_data = item.data(Qt.ItemDataRole.UserRole)
+        if not item_data:
+            return
+
+        db_type = item_data.get('db_type')
+
+        if db_type == 'postgres':
+            # --- Check if we are expanding a Schema OR a Table ---
+            schema_name = item_data.get('schema_name')
+            table_name = item_data.get('table_name')
+
+            if table_name and schema_name:
+                # --- CASE 1: Expanding a POSTGRES TABLE ---
+                # This item is a table, load its details
+                self.load_postgres_table_details(item, item_data)
+
+            elif schema_name:
+                # --- CASE 2: Expanding a POSTGRES SCHEMA ---
+                # This is the original logic for expanding a schema to show tables
+                item.removeRows(0, item.rowCount()) # "Loading..." মুছি
+                try:
+                    cursor = self.pg_conn.cursor()
+                    cursor.execute("SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = %s ORDER BY table_type, table_name;", (schema_name,))
+                    tables = cursor.fetchall()
+                    for (table_name, table_type) in tables:
+                        icon_path = "assets/table_icon.png" if "TABLE" in table_type else "assets/view_icon.png"
+                        table_item = QStandardItem(QIcon(icon_path), table_name)
+                        table_item.setEditable(False)
+                        
+                        table_data = item_data.copy() 
+                        table_data['table_name'] = table_name
+                        table_data['table_type'] = table_type
+                        table_item.setData(table_data, Qt.ItemDataRole.UserRole)
+                        
+                        # --- MODIFICATION: UNCOMMENTED ---
+                        # Add placeholder to tables to make them expandable
+                        if "TABLE" in table_type:
+                           table_item.appendRow(QStandardItem("Loading..."))
+                        # --- END MODIFICATION ---
+
+                        item.appendRow(table_item)
+                except Exception as e:
+                    self.status.showMessage(f"Error expanding schema: {e}", 5000)
+                    item.appendRow(QStandardItem(f"Error: {e}"))
+            # --------------------------------------------------------
+
+        elif db_type == 'sqlite':
+            # --- CASE 3: Expanding an SQLITE TABLE ---
+            # This logic is correct, it calls the new function
+            self.load_sqlite_table_details(item, item_data)
+
+            # ----------------------------------
+
+    # def load_tables_on_expand(self, index: QModelIndex):
+    #     item = self.schema_model.itemFromIndex(index)
+        
+    #     if not item or (item.rowCount() > 0 and item.child(0).text() != "Loading..."):
+    #         return
+
+    #     item_data = item.data(Qt.ItemDataRole.UserRole)
+    #     if not item_data:
+    #         return
+
+    #     db_type = item_data.get('db_type')
+
+    #     if db_type == 'postgres':
+    #         # --- Check if we are expanding a Schema OR a Table ---
+    #         schema_name = item_data.get('schema_name')
+    #         table_name = item_data.get('table_name')
+
+    #         if table_name and schema_name:
+    #             # --- CASE 1: Expanding a POSTGRES TABLE ---
+    #             # This item is a table, load its details
+    #             self.load_postgres_table_details(item, item_data)
+
+    #         elif schema_name:
+    #             # --- CASE 2: Expanding a POSTGRES SCHEMA ---
+    #             # This is the original logic for expanding a schema to show tables
+    #             item.removeRows(0, item.rowCount()) # "Loading..." মুছি
+    #             try:
+    #                 cursor = self.pg_conn.cursor()
+    #                 cursor.execute("SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = %s ORDER BY table_type, table_name;", (schema_name,))
+    #                 tables = cursor.fetchall()
+    #                 for (table_name, table_type) in tables:
+    #                     icon_path = "assets/table_icon.png" if "TABLE" in table_type else "assets/view_icon.png"
+    #                     table_item = QStandardItem(QIcon(icon_path), table_name)
+    #                     table_item.setEditable(False)
+                        
+    #                     table_data = item_data.copy() 
+    #                     table_data['table_name'] = table_name
+    #                     table_data['table_type'] = table_type
+    #                     table_item.setData(table_data, Qt.ItemDataRole.UserRole)
+                        
+    #                     # --- MODIFICATION: UNCOMMENTED ---
+    #                     # Add placeholder to tables to make them expandable
+    #                     if "TABLE" in table_type:
+    #                        table_item.appendRow(QStandardItem("Loading..."))
+    #                     # --- END MODIFICATION ---
+
+    #                     item.appendRow(table_item)
+    #             except Exception as e:
+    #                 self.status.showMessage(f"Error expanding schema: {e}", 5000)
+    #                 item.appendRow(QStandardItem(f"Error: {e}"))
+    #         # --------------------------------------------------------
+
+    #     elif db_type == 'sqlite':
+    #         # --- CASE 3: Expanding an SQLITE TABLE ---
+    #         # This logic is correct, it calls the new function
+    #         self.load_sqlite_table_details(item, item_data)
+
+
+
+
+    def load_sqlite_table_details(self, table_item, item_data):
+        """
+        Loads columns, indexes, and constraints (Foreign Keys) for an SQLite table.
+        """
+        if not item_data or table_item.rowCount() == 0 or table_item.child(0).text() != "Loading...":
+            return # Already loaded or not expandable
+
+        table_item.removeRows(0, table_item.rowCount()) # Clear "Loading..."
+
+        table_name = item_data.get('table_name')
+        conn_data = item_data.get('conn_data')
+        if not table_name or not conn_data:
+            return
+
+        conn = None
+        try:
+            conn = db.create_sqlite_connection(conn_data["db_path"])
+            cursor = conn.cursor()
+
+            # --- 1. Add Columns Folder ---
+            columns_folder = QStandardItem("Columns")
+            columns_folder.setEditable(False)
+            
+            # PRAGMA table_info format: (cid, name, type, notnull, dflt_value, pk)
+            cursor.execute(f'PRAGMA table_info("{table_name}");')
+            columns = cursor.fetchall()
+            if not columns:
+                 columns_folder.appendRow(QStandardItem("No columns found"))
+            else:
+                for col in columns:
+                    cid, name, type, notnull, dflt_value, pk = col
+                    desc = f"{name} ({type})"
+                    if pk:
+                        desc += " [PK]"
+                    if notnull:
+                        desc += " [NOT NULL]"
+                    col_item = QStandardItem(desc)
+                    col_item.setEditable(False)
+                    columns_folder.appendRow(col_item)
+            table_item.appendRow(columns_folder)
+
+            # --- 2. Add Indexes Folder ---
+            indexes_folder = QStandardItem("Indexes")
+            indexes_folder.setEditable(False)
+            
+            # PRAGMA index_list format: (seq, name, unique, origin, partial)
+            cursor.execute(f'PRAGMA index_list("{table_name}");')
+            indexes = cursor.fetchall()
+            
+            if not indexes:
+                indexes_folder.appendRow(QStandardItem("No indexes"))
+            else:
+                for idx in indexes:
+                    seq, name, unique, origin, partial = idx
+                    if name.startswith("sqlite_autoindex_"):
+                        continue # Skip auto-indexes
+                    
+                    # Get columns for this index
+                    cursor.execute(f'PRAGMA index_info("{name}");')
+                    idx_cols = cursor.fetchall()
+                    col_names = ", ".join([c[2] for c in idx_cols])
+                    
+                    desc = f"{name} ({col_names})"
+                    if unique:
+                        desc += " [UNIQUE]"
+                    if origin == 'pk':
+                         desc += " [PK]"
+                    
+                    idx_item = QStandardItem(desc)
+                    idx_item.setEditable(False)
+                    indexes_folder.appendRow(idx_item)
+
+            table_item.appendRow(indexes_folder)
+            
+            # --- 3. Add Constraints Folder (MODIFIED) ---
+            fk_folder = QStandardItem("Constraints") # Renamed folder
+            fk_folder.setEditable(False)
+            
+            # PRAGMA foreign_key_list format:
+            # (id, seq, table, from, to, on_update, on_delete, match)
+            cursor.execute(f'PRAGMA foreign_key_list("{table_name}");')
+            fks = cursor.fetchall()
+
+            if not fks:
+                fk_folder.appendRow(QStandardItem("No foreign keys")) # Message is specific
+            else:
+                # Group multi-column FKs by their ID
+                fk_groups = {}
+                for id, seq, table, from_col, to_col, on_update, on_delete, match in fks:
+                    if id not in fk_groups:
+                        fk_groups[id] = {
+                            'from_cols': [],
+                            'to_cols': [],
+                            'table': table,
+                            'rules': f"ON UPDATE {on_update} ON DELETE {on_delete}"
+                        }
+                    # Ensure columns are added in the correct order (by seq)
+                    fk_groups[id]['from_cols'].append(from_col)
+                    fk_groups[id]['to_cols'].append(to_col)
+
+                # Create display items from the grouped FKs
+                for id, data in fk_groups.items():
+                    from_str = ", ".join(data['from_cols'])
+                    to_str = ", ".join(data['to_cols'])
+                    
+                    # Added [FK] prefix for clarity
+                    desc = f"[FK] ({from_str}) -> {data['table']}({to_str})"
+                    desc += f" [{data['rules']}]"
+                    
+                    fk_item = QStandardItem(desc)
+                    fk_item.setEditable(False)
+                    fk_folder.appendRow(fk_item)
+
+            table_item.appendRow(fk_folder)
+            # --- END MODIFIED SECTION ---
+
+        except Exception as e:
+            table_item.appendRow(QStandardItem(f"Error: {e}"))
+            self.status.showMessage(f"Error loading table details: {e}", 5000)
+        finally:
+            if conn:
+              conn.close()
+              
+              
+    def load_postgres_table_details(self, table_item, item_data):
+        """
+        Loads columns, indexes, and constraints for a Postgres table.
+        """
+        if not item_data or table_item.rowCount() == 0 or table_item.child(0).text() != "Loading...":
+            return # Already loaded
+
+        table_item.removeRows(0, table_item.rowCount()) # Clear "Loading..."
+
         schema_name = item_data.get('schema_name')
+        table_name = item_data.get('table_name')
+        if not table_name or not schema_name or not hasattr(self, 'pg_conn') or self.pg_conn.closed:
+             if not hasattr(self, 'pg_conn') or self.pg_conn.closed:
+                 self.status.showMessage("Connection lost. Please reload schema.", 5000)
+             table_item.appendRow(QStandardItem("Error: Connection unavailable"))
+             return
+
         try:
             cursor = self.pg_conn.cursor()
-            cursor.execute("SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = %s ORDER BY table_type, table_name;", (schema_name,))
-            tables = cursor.fetchall()
-            for (table_name, table_type) in tables:
-                icon_path = "assets/table_icon.png" if "TABLE" in table_type else "assets/view_icon.png"
-                table_item = QStandardItem(QIcon(icon_path), table_name)
-                table_item.setEditable(False)
-                table_item.setData(item_data, Qt.ItemDataRole.UserRole)
-                item.appendRow(table_item)
+
+            # --- 1. Add Columns Folder ---
+            columns_folder = QStandardItem("Columns")
+            columns_folder.setEditable(False)
+            
+            # Query for columns, data type, nullability, defaults, and PK status
+            col_query = """
+            SELECT 
+                c.column_name, 
+                c.data_type, 
+                c.character_maximum_length,
+                c.is_nullable, 
+                c.column_default,
+                CASE WHEN kcu.column_name IS NOT NULL THEN 'YES' ELSE 'NO' END AS is_pk
+            FROM information_schema.columns c
+            LEFT JOIN information_schema.key_column_usage kcu
+              ON c.table_schema = kcu.table_schema 
+              AND c.table_name = kcu.table_name 
+              AND c.column_name = kcu.column_name
+            LEFT JOIN information_schema.table_constraints tc
+              ON kcu.constraint_name = tc.constraint_name
+              AND kcu.table_schema = tc.table_schema
+              AND kcu.table_name = tc.table_name
+              AND tc.constraint_type = 'PRIMARY KEY'
+            WHERE c.table_schema = %s AND c.table_name = %s
+            ORDER BY c.ordinal_position;
+            """
+            cursor.execute(col_query, (schema_name, table_name))
+            columns = cursor.fetchall()
+            
+            for col in columns:
+                name, dtype, char_max, is_nullable, default, is_pk = col
+                desc = f"{name} ({dtype}"
+                if char_max:
+                    desc += f"[{char_max}]"
+                desc += ")"
+                if is_pk == 'YES':
+                    desc += " [PK]"
+                if is_nullable == 'NO':
+                    desc += " [NOT NULL]"
+                if default:
+                    desc += f" [default: {str(default)[:20]}...]"
+                
+                col_item = QStandardItem(desc)
+                col_item.setEditable(False)
+                columns_folder.appendRow(col_item)
+            table_item.appendRow(columns_folder)
+
+            # --- 2. Add Constraints Folder ---
+            constraints_folder = QStandardItem("Constraints")
+            constraints_folder.setEditable(False)
+            
+            con_query = """
+            SELECT 
+                tc.constraint_name, 
+                tc.constraint_type,
+                kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+              AND tc.table_schema = kcu.table_schema
+            WHERE tc.table_schema = %s AND tc.table_name = %s
+            ORDER BY tc.constraint_type, tc.constraint_name;
+            """
+            cursor.execute(con_query, (schema_name, table_name))
+            constraints = cursor.fetchall()
+            
+            # Group columns by constraint name
+            con_map = {}
+            for name, type, col in constraints:
+                if name not in con_map:
+                    con_map[name] = {'type': type, 'cols': []}
+                con_map[name]['cols'].append(col)
+            
+            if not con_map:
+                constraints_folder.appendRow(QStandardItem("No constraints"))
+            else:
+                for name, data in con_map.items():
+                    cols_str = ", ".join(data['cols'])
+                    desc = f"{name} [{data['type']}] ({cols_str})"
+                    con_item = QStandardItem(desc)
+                    con_item.setEditable(False)
+                    constraints_folder.appendRow(con_item)
+            table_item.appendRow(constraints_folder)
+
+            # --- 3. Add Indexes Folder ---
+            indexes_folder = QStandardItem("Indexes")
+            indexes_folder.setEditable(False)
+            
+            # Query pg_indexes (simpler than info_schema for this)
+            idx_query = "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = %s AND tablename = %s;"
+            cursor.execute(idx_query, (schema_name, table_name))
+            indexes = cursor.fetchall()
+
+            if not indexes:
+                indexes_folder.appendRow(QStandardItem("No indexes"))
+            else:
+                for name, definition in indexes:
+                     # Don't show the constraint-based indexes, they are in the other folder
+                    if name in con_map:
+                        continue
+                    
+                     # Clean up definition
+                    import re
+                    match = re.search(r'USING \w+ \((.*)\)', definition)
+                    cols_str = match.group(1) if match else "..."
+                    
+                    desc = f"{name} ({cols_str})"
+                    idx_item = QStandardItem(desc)
+                    idx_item.setEditable(False)
+                    indexes_folder.appendRow(idx_item)
+            table_item.appendRow(indexes_folder)
+
         except Exception as e:
-            self.status.showMessage(f"Error expanding schema: {e}", 5000)
+            if hasattr(self, 'pg_conn') and self.pg_conn:
+                self.pg_conn.rollback() # Rollback any failed transaction
+            table_item.appendRow(QStandardItem(f"Error: {e}"))
+            self.status.showMessage(f"Error loading table details: {e}", 5000)
+        # No finally/close, as pg_conn is shared and used for subsequent expansions
+    
+    
+    
