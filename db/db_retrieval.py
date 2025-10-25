@@ -34,7 +34,6 @@ def get_all_connections_from_db():
         })
     return connections
 
-
 def get_hierarchy_data():
     """Returns all usf_connection_types, usf_connection_groups, and usf_connections for the main tree view."""
     with sqlite.connect(DB_FILE) as conn:
