@@ -51,7 +51,8 @@ class RunnableExport(QRunnable):
             
             
             file_path = self.export_options['filename']
-            file_format = self.export_options['format']
+            file_format = os.path.splitext(file_path)[1].lower()
+            # file_format = self.export_options['format']
             if file_format == 'xlsx':
                 df.to_excel(file_path, index=False,
                             header=self.export_options['header'])
