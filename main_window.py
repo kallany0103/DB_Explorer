@@ -2080,9 +2080,8 @@ class MainWindow(QMainWindow):
                         type_item = QStandardItem(type_text)
                         type_item.setEditable(False)
 
-                        # টেবিল আইটেম এবং টাইপ আইটেম, দুটিই একসাথে যোগ করুন
                         item.appendRow([table_item, type_item])
-                        # --- পরিবর্তন শেষ ---
+                       
 
                 except Exception as e:
                     self.status.showMessage(f"Error expanding schema: {e}", 5000)
