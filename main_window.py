@@ -1435,53 +1435,153 @@ class MainWindow(QMainWindow):
         dialog = TablePropertiesDialog(item_data, table_name, self)
         dialog.exec()
 
+    # def export_schema_table_rows(self, item_data, table_name):
+    #     if not item_data:
+    #         return
+    #     dialog = ExportDialog(
+    #         self, f"{table_name}_{datetime.datetime.now().strftime('%Y%m%d')}.csv")
+    #     if dialog.exec() != QDialog.DialogCode.Accepted:
+    #         return
+        
+    #     options = dialog.get_options()
+    #     if not options['filename']:
+    #         QMessageBox.warning(self, "No Filename",
+    #                             "Export cancelled. No filename specified.")
+    #         return
+    #     if options["delimiter"] == ',':
+    #         options["delimiter"] = None
+    #     full_process_id = str(uuid.uuid4())
+    #     short_id = full_process_id[:8]
+    #     conn_data = item_data['conn_data']
+        
+    #     # --- MODIFICATION: Handle SQLite schema name (which is None) ---
+    #     schema_part = item_data.get('schema_name')
+    #     if schema_part:
+    #         object_name = f"{schema_part}.{table_name}"
+    #     else:
+    #         object_name = table_name
+    #     # --- END MODIFICATION ---
+
+    #     initial_data = {
+    #         "pid": short_id[:8], 
+    #         "type": "Export Data", 
+    #         "status": "Running", 
+    #         "server": conn_data.get('short_name', conn_data['name']), 
+    #         "object": object_name, 
+    #         "time_taken": "...",
+    #         "start_time": datetime.datetime.now().strftime("%Y-%m-%d, %I:%M:%S %p"), 
+    #         "details": f"Exporting to {os.path.basename(options['filename'])}",
+    #         # --- START MODIFICATION (Previous change) ---
+    #         "_conn_id": conn_data.get('id')
+    #         # --- END MODIFICATION ---
+    #     }
+    #     signals = ProcessSignals()
+    #     signals.started.connect(self.handle_process_started)
+    #     signals.finished.connect(self.handle_process_finished)
+    #     signals.error.connect(self.handle_process_error)
+    #     signals.started.emit(short_id, initial_data)
+    #     self.thread_pool.start(RunnableExport(
+    #         short_id, item_data, table_name, options, signals))
     def export_schema_table_rows(self, item_data, table_name):
         if not item_data:
             return
+
+        # 1. এক্সপোর্ট ডায়লগ প্রথমে দেখান এবং ফাইলনেম ও অপশন নিন
         dialog = ExportDialog(
             self, f"{table_name}_{datetime.datetime.now().strftime('%Y%m%d')}.csv")
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         
-        options = dialog.get_options()
-        if not options['filename']:
+        export_options = dialog.get_options()
+        if not export_options['filename']:
             QMessageBox.warning(self, "No Filename",
                                 "Export cancelled. No filename specified.")
             return
-        if options["delimiter"] == ',':
-            options["delimiter"] = None
-        full_process_id = str(uuid.uuid4())
-        short_id = full_process_id[:8]
+
+        # 2. ডেটাবেস থেকে সব ডেটা আনার জন্য কোয়েরি তৈরি করুন
         conn_data = item_data['conn_data']
         
-        # --- MODIFICATION: Handle SQLite schema name (which is None) ---
-        schema_part = item_data.get('schema_name')
-        if schema_part:
-            object_name = f"{schema_part}.{table_name}"
-        else:
+        if item_data.get('db_type') == 'postgres':
+            schema_name = item_data.get("schema_name")
+            query = f'SELECT * FROM "{schema_name}"."{table_name}";'
+            object_name = f"{schema_name}.{table_name}"
+        else: # SQLite
+            query = f'SELECT * FROM "{table_name}";'
             object_name = table_name
-        # --- END MODIFICATION ---
 
-        initial_data = {
-            "pid": short_id[:8], 
-            "type": "Export Data", 
-            "status": "Running", 
-            "server": conn_data.get('short_name', conn_data['name']), 
-            "object": object_name, 
-            "time_taken": "...",
-            "start_time": datetime.datetime.now().strftime("%Y-%m-%d, %I:%M:%S %p"), 
-            "details": f"Exporting to {os.path.basename(options['filename'])}",
-            # --- START MODIFICATION (Previous change) ---
-            "_conn_id": conn_data.get('id')
-            # --- END MODIFICATION ---
-        }
-        signals = ProcessSignals()
-        signals.started.connect(self.handle_process_started)
-        signals.finished.connect(self.handle_process_finished)
-        signals.error.connect(self.handle_process_error)
-        signals.started.emit(short_id, initial_data)
-        self.thread_pool.start(RunnableExport(
-            short_id, item_data, table_name, options, signals))
+        # 3. একটি প্রসেস আইডি তৈরি করুন
+        full_process_id = str(uuid.uuid4())
+        short_id = full_process_id[:8]
+
+        # 4. একটি 'নেস্টেড' (Nested) ফাংশন তৈরি করুন
+        #    এই ফাংশনটি কোয়েরি সফলভাবে শেষ হলে কল হবে
+        def on_data_fetched_for_export(
+            _conn_data, _query, results, columns, row_count, _elapsed_time, _is_select_query
+        ):
+            """
+            এই নেস্টেড ফাংশনটি RunnableQuery থেকে ডেটা পাওয়ার পর কাজ শুরু করে।
+            এটি RunnableExportFromModel (সঠিক ওয়ার্কার) ব্যবহার করে।
+            """
+            
+            self.status_message_label.setText("Data fetched. Starting export process...")
+
+            # 4a. কোয়েরি রেজাল্ট থেকে একটি QStandardItemModel তৈরি করুন
+            model = QStandardItemModel()
+            model.setColumnCount(len(columns))
+            model.setRowCount(len(results))
+            model.setHorizontalHeaderLabels(columns)
+
+            for row_idx, row in enumerate(results):
+                for col_idx, cell in enumerate(row):
+                    model.setItem(row_idx, col_idx, QStandardItem(str(cell)))
+
+            # 4b. প্রসেস ইনফরমেশন তৈরি করুন (export_result_rows থেকে নেওয়া)
+            if export_options["delimiter"] == ',':
+                export_options["delimiter"] = None
+
+            conn_name = conn_data.get("short_name", conn_data.get("name", "Unknown"))
+            conn_id = conn_data.get("id")
+
+            initial_data = {
+               "pid": short_id,
+               "type": "Export Data",
+               "status": "Running",
+               "server": conn_name,
+               "object": object_name, # টেবিলের নাম
+               "time_taken": "...",
+               "start_time": datetime.datetime.now().strftime("%Y-%m-%d, %I:%M:%S %p"),
+               "details": f"Exporting {row_count} rows to {os.path.basename(export_options['filename'])}",
+               "_conn_id": conn_id
+            }
+
+            signals = ProcessSignals()
+            signals.started.connect(self.handle_process_started)
+            signals.finished.connect(self.handle_process_finished)
+            signals.error.connect(self.handle_process_error)
+            
+            # 4c. সঠিক ওয়ার্কারটি (RunnableExportFromModel) কল করুন
+            self.thread_pool.start(
+              RunnableExportFromModel(short_id, model, export_options, signals)
+            )
+            
+            signals.started.emit(short_id, initial_data)
+
+        # 5. ডেটা আনার জন্য RunnableQuery থ্রেড শুরু করুন
+        self.status_message_label.setText(f"Fetching data from {table_name} for export...")
+        
+        query_signals = QuerySignals()
+        query_runnable = RunnableQuery(conn_data, query, query_signals)
+        
+        # 6. কোয়েরি শেষ হলে উপরের 'নেস্টেড' ফাংশনটি (on_data_fetched_for_export) কল করুন
+        query_signals.finished.connect(on_data_fetched_for_export)
+        
+        query_signals.error.connect(
+             lambda conn, q, rc, et, err: self.show_error_popup(
+                 f"Failed to fetch data for export:\n{err}"
+             )
+        )
+        
+        self.thread_pool.start(query_runnable)
         
         
     def show_results_context_menu(self, position):
@@ -1869,6 +1969,61 @@ class MainWindow(QMainWindow):
             self.tab_widget.setCurrentWidget(new_tab)
             self.execute_query()
     
+    # def load_tables_on_expand(self, index: QModelIndex):
+    #     item = self.schema_model.itemFromIndex(index)
+        
+    #     if not item or (item.rowCount() > 0 and item.child(0).text() != "Loading..."):
+    #         return
+
+    #     item_data = item.data(Qt.ItemDataRole.UserRole)
+    #     if not item_data:
+    #         return
+
+    #     db_type = item_data.get('db_type')
+
+    #     if db_type == 'postgres':
+    #         # --- Check if we are expanding a Schema OR a Table ---
+    #         schema_name = item_data.get('schema_name')
+    #         table_name = item_data.get('table_name')
+
+    #         if table_name and schema_name:
+    #             # --- CASE 1: Expanding a POSTGRES TABLE ---
+    #             # This item is a table, load its details
+    #             self.load_postgres_table_details(item, item_data)
+    #         elif schema_name:
+    #             # --- CASE 2: Expanding a POSTGRES SCHEMA ---
+    #             # This is the original logic for expanding a schema to show tables
+    #             item.removeRows(0, item.rowCount()) # "Loading..." মুছি
+    #             try:
+    #                 cursor = self.pg_conn.cursor()
+    #                 cursor.execute("SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = %s ORDER BY table_type, table_name;", (schema_name,))
+    #                 tables = cursor.fetchall()
+    #                 for (table_name, table_type) in tables:
+    #                     icon_path = "assets/table_icon.png" if "TABLE" in table_type else "assets/view_icon.png"
+    #                     table_item = QStandardItem(QIcon(icon_path), table_name)
+    #                     table_item.setEditable(False)
+                        
+    #                     table_data = item_data.copy() 
+    #                     table_data['table_name'] = table_name
+    #                     table_data['table_type'] = table_type
+    #                     table_item.setData(table_data, Qt.ItemDataRole.UserRole)
+                        
+    #                     # Add placeholder to tables to make them expandable
+    #                     if "TABLE" in table_type:
+    #                        table_item.appendRow(QStandardItem("Loading..."))
+
+    #                     item.appendRow(table_item)
+    #             except Exception as e:
+    #                 self.status.showMessage(f"Error expanding schema: {e}", 5000)
+    #                 item.appendRow(QStandardItem(f"Error: {e}"))
+    #         # --------------------------------------------------------
+
+    #     elif db_type == 'sqlite':
+    #         # --- CASE 3: Expanding an SQLITE TABLE ---
+    #         self.load_sqlite_table_details(item, item_data)
+
+    # main_window.py
+
     def load_tables_on_expand(self, index: QModelIndex):
         item = self.schema_model.itemFromIndex(index)
         
@@ -1912,7 +2067,23 @@ class MainWindow(QMainWindow):
                         if "TABLE" in table_type:
                            table_item.appendRow(QStandardItem("Loading..."))
 
-                        item.appendRow(table_item)
+                        # --- পরিবর্তন শুরু ---
+                        # 'Type' কলামের জন্য আইটেম তৈরি করুন
+                        if "TABLE" in table_type:
+                            type_text = "Table"
+                        elif "VIEW" in table_type:
+                            type_text = "View"
+                        else:
+                            # অন্য কোনো টাইপ হলে সেটি দেখাবে (যেমন: 'FOREIGN TABLE')
+                            type_text = table_type.title() 
+                        
+                        type_item = QStandardItem(type_text)
+                        type_item.setEditable(False)
+
+                        # টেবিল আইটেম এবং টাইপ আইটেম, দুটিই একসাথে যোগ করুন
+                        item.appendRow([table_item, type_item])
+                        # --- পরিবর্তন শেষ ---
+
                 except Exception as e:
                     self.status.showMessage(f"Error expanding schema: {e}", 5000)
                     item.appendRow(QStandardItem(f"Error: {e}"))
