@@ -49,7 +49,7 @@ class RunnableExport(QRunnable):
             # DataFrame 
             df = pd.DataFrame(data, columns=headers)
             
-            
+        
             file_path = self.export_options['filename']
             file_format = os.path.splitext(file_path)[1].lower()
             # file_format = self.export_options['format']

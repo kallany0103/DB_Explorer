@@ -2088,7 +2088,6 @@ class MainWindow(QMainWindow):
                     self.status.showMessage(f"Error expanding schema: {e}", 5000)
                     item.appendRow(QStandardItem(f"Error: {e}"))
             # --------------------------------------------------------
-
         elif db_type == 'sqlite':
             # --- CASE 3: Expanding an SQLITE TABLE ---
             self.load_sqlite_table_details(item, item_data)
