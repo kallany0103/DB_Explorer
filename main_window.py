@@ -2386,4 +2386,4 @@ class MainWindow(QMainWindow):
                 self.pg_conn.rollback() # Rollback any failed transaction
             table_item.appendRow(QStandardItem(f"Error: {e}"))
             self.status.showMessage(f"Error loading table details: {e}", 5000)
-        # No finally/close, as pg_conn is shared and used for subsequent expansions
+        # No finally/close, as pg_conn is shared and used for subsequent expansions new
