@@ -2380,7 +2380,6 @@ class MainWindow(QMainWindow):
                     idx_item = QStandardItem(desc)
                     idx_item.setEditable(False)
                     indexes_folder.appendRow(idx_item)
-            
             table_item.appendRow(indexes_folder)
         except Exception as e:
             if hasattr(self, 'pg_conn') and self.pg_conn:
