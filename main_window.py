@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTreeView, QTabWidget,
     QSplitter, QLineEdit, QTextEdit, QComboBox, QTableView, QHeaderView, QVBoxLayout, QWidget, QStatusBar, QToolBar, QFileDialog,
     QSizePolicy, QPushButton, QInputDialog, QMessageBox, QMenu, QAbstractItemView, QDialog, QFormLayout, QHBoxLayout,
-    QStackedWidget, QLabel, QGroupBox,QCheckBox,QStyle,QDialogButtonBox, QPlainTextEdit, QButtonGroup
+    QStackedWidget, QLabel, QGroupBox,QCheckBox,QStyle,QDialogButtonBox, QPlainTextEdit, QButtonGroup, QToolButton
 )
 from PyQt6.QtWidgets import QAbstractItemView
 from PyQt6.QtSql import QSqlDatabase, QSqlTableModel
@@ -43,7 +43,6 @@ class MainWindow(QMainWindow):
         self._create_menu()
         self._create_centered_toolbar()
 
-        # main_splitter কে self attribute হিসেবে রাখা হলো
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(self.main_splitter)
 
@@ -55,6 +54,7 @@ class MainWindow(QMainWindow):
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0) # <<< MODIFICATION: Set spacing to 0
 
         self.tree = QTreeView()
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -70,8 +70,30 @@ class MainWindow(QMainWindow):
         self.model = QStandardItemModel()
         self.model.setHorizontalHeaderLabels(['Object Explorer'])
         self.tree.setModel(self.model)
+        
+        self.tree.setHeaderHidden(True) # <<< MODIFICATION: Hide default header
 
-        # vertical_splitter কে self attribute হিসেবে রাখা হলো
+        # --- Create Object Explorer Header (Query Tool Button) ---
+        object_explorer_header = QWidget()
+        object_explorer_header.setObjectName("objectExplorerHeader") # For styling
+        object_explorer_header_layout = QHBoxLayout(object_explorer_header)
+        object_explorer_header_layout.setContentsMargins(5, 0, 2, 0) # Tight margins
+        object_explorer_header_layout.setSpacing(4)
+
+        object_explorer_label = QLabel("Object Explorer")
+        # Style is set in _apply_styles
+        
+        object_explorer_header_layout.addWidget(object_explorer_label)
+        object_explorer_header_layout.addStretch()
+
+        self.explorer_query_tool_btn = QToolButton()
+        self.explorer_query_tool_btn.setDefaultAction(self.query_tool_action) 
+        self.explorer_query_tool_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.explorer_query_tool_btn.setToolTip("Open new query tool")
+        self.explorer_query_tool_btn.setIconSize(QSize(20, 20)) # Make it small
+        
+        object_explorer_header_layout.addWidget(self.explorer_query_tool_btn)
+        
         self.left_vertical_splitter = QSplitter(Qt.Orientation.Vertical)
         self.left_vertical_splitter.addWidget(self.tree)
 
@@ -86,8 +108,12 @@ class MainWindow(QMainWindow):
         self.left_vertical_splitter.addWidget(self.schema_tree)
 
         self.left_vertical_splitter.setSizes([240, 360])
+        
+        # Add new header FIRST, then splitter
+        left_layout.addWidget(object_explorer_header) 
         left_layout.addWidget(self.left_vertical_splitter)
         self.main_splitter.addWidget(left_panel)
+        # --- END MODIFICATION ---
 
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)
@@ -108,6 +134,12 @@ class MainWindow(QMainWindow):
         self._apply_styles()
 
     def _create_actions(self):
+        style = QApplication.style()
+        open_icon = style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton)
+        
+        self.open_file_action = QAction(open_icon, "Open File", self)
+        self.open_file_action.triggered.connect(self.open_sql_file)
+        
         self.exit_action = QAction(QIcon("assets/exit_icon.png"), "Exit", self)
         self.exit_action.triggered.connect(self.close)
         self.execute_action = QAction(
@@ -129,8 +161,10 @@ class MainWindow(QMainWindow):
         self.paste_action.triggered.connect(self.paste_text)
         self.delete_action = QAction("Delete", self)
         self.delete_action.triggered.connect(self.delete_text)
-        self.query_tool_action = QAction("Query Tool", self)
+        
+        self.query_tool_action = QAction(QIcon("assets/sql_icon.png"), "Query Tool", self)
         self.query_tool_action.triggered.connect(self.add_tab)
+        
         self.restore_action = QAction("Restore Layout", self)
         self.restore_action.triggered.connect(self.restore_tool)
         self.refresh_action = QAction("Refresh Explorer", self)
@@ -154,6 +188,8 @@ class MainWindow(QMainWindow):
     def _create_menu(self):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("&File")
+        file_menu.addAction(self.open_file_action)
+        file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
         edit_menu = menubar.addMenu("&Edit")
         edit_menu.addAction(self.undo_action)
@@ -187,6 +223,8 @@ class MainWindow(QMainWindow):
 
     def _create_centered_toolbar(self):
         toolbar = QToolBar("Main Toolbar")
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon) 
+        toolbar.setIconSize(QSize(16, 16)) 
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         left_spacer = QWidget()
         left_spacer.setSizePolicy(
@@ -195,6 +233,7 @@ class MainWindow(QMainWindow):
         right_spacer.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(left_spacer)
+        toolbar.addAction(self.open_file_action)
         toolbar.addAction(self.exit_action)
         toolbar.addAction(self.execute_action)
         toolbar.addAction(self.cancel_action)
@@ -202,6 +241,42 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
     # --- New Handler Methods for Menu Actions ---
+
+    def open_sql_file(self):
+        editor = self._get_current_editor()
+        
+        if not editor:
+            current_tab = self.tab_widget.currentWidget()
+            if not current_tab:
+                
+                self.add_tab()
+                current_tab = self.tab_widget.currentWidget()
+
+           
+            editor_stack = current_tab.findChild(QStackedWidget, "editor_stack")
+            if editor_stack and editor_stack.currentIndex() != 0:
+                editor_stack.setCurrentIndex(0)
+                
+                query_view_btn = current_tab.findChild(QPushButton, "Query")
+                history_view_btn = current_tab.findChild(QPushButton, "Query History")
+                if query_view_btn: query_view_btn.setChecked(True)
+                if history_view_btn: history_view_btn.setChecked(False)
+
+            editor = self._get_current_editor()
+
+            if not editor: 
+                QMessageBox.warning(self, "Error", "Could not find a query editor to open the file into.")
+                return
+
+        file_name, _ = QFileDialog.getOpenFileName(self, "Open SQL File", "", "SQL Files (*.sql);;All Files (*)")
+        if file_name:
+            try:
+                with open(file_name, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    editor.setPlainText(content)
+                    self.status.showMessage(f"File opened: {file_name}", 3000)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Could not read file:\n{e}")
 
     def show_about_dialog(self):
         QMessageBox.about(self, "About SQL Client", "<b>SQL Client Application</b><p>Version 1.0.0</p><p>This is a versatile SQL client designed to connect to and manage multiple database systems including PostgreSQL and SQLite.</p><p><b>Features:</b></p><ul><li>Object Explorer for database schemas</li><li>Multi-tab query editor with syntax highlighting</li><li>Query history per connection</li><li>Asynchronous query execution to keep the UI responsive</li></ul><p>Developed to provide a simple and effective tool for database management.</p>")
@@ -281,7 +356,32 @@ class MainWindow(QMainWindow):
     def _apply_styles(self):
         primary_color, header_color, selection_color = "#D3D3D3", "#A9A9A9", "#A9A9A9"
         text_color_on_primary, alternate_row_color, border_color = "#000000", "#f0f0f0", "#A9A9A9"
-        self.setStyleSheet(f"""QMainWindow, QToolBar, QStatusBar {{ background-color: {primary_color}; color: {text_color_on_primary}; }} QTreeView {{ background-color: white; alternate-background-color: {alternate_row_color}; border: 1px solid {border_color}; }} QTableView {{ alternate-background-color: {alternate_row_color}; background-color: white; gridline-color: #a9a9a9; border: 1px solid {border_color}; font-family: Arial, sans-serif; font-size: 9pt;}} QTableView::item {{ padding: 4px; }} QTableView::item:selected {{ background-color: {selection_color}; color: white; }} QHeaderView::section {{ background-color: {header_color}; color: white; padding: 4px; border: none; border-right: 1px solid #d3d3d3; border-bottom: 1px solid {border_color}; font-weight: bold; font-size: 9pt;  }} QTableView QTableCornerButton::section {{ background-color: {header_color}; border: 1px solid {border_color}; }} #resultsHeader QPushButton, #editorHeader QPushButton {{ background-color: #ffffff; border: 1px solid {border_color}; padding: 5px 15px; font-size: 9pt; }} #resultsHeader QPushButton:hover, #editorHeader QPushButton:hover {{ background-color: {primary_color}; }} #resultsHeader QPushButton:checked, #editorHeader QPushButton:checked {{ background-color: {selection_color}; border-bottom: 1px solid {selection_color}; font-weight: bold; color: white; }} #resultsHeader, #editorHeader {{ background-color: {alternate_row_color}; padding-bottom: -1px; }} #messageView, #history_details_view, QTextEdit {{ font-family: Consolas, monospace; font-size: 10pt; background-color: white; border: 1px solid {border_color}; }} #tab_status_label {{ padding: 3px 5px; background-color: {alternate_row_color}; border-top: 1px solid {border_color}; }} QGroupBox {{ font-size: 9pt; font-weight: bold; color: {text_color_on_primary}; }} QTabWidget::pane {{ border-top: 1px solid {border_color}; }} QTabBar::tab {{ background: #E0E0E0; border: 1px solid {border_color}; padding: 5px 10px; border-bottom: none; }} QTabBar::tab:selected {{ background: {selection_color}; color: white; }} QComboBox {{ border: 1px solid {border_color}; padding: 2px; background-color: white; }}""")
+        self.setStyleSheet(f"""QMainWindow, QToolBar, QStatusBar {{ background-color: {primary_color}; color: {text_color_on_primary}; }} QTreeView {{ background-color: white; alternate-background-color: {alternate_row_color}; border: 1px solid {border_color}; }} QTableView {{ alternate-background-color: {alternate_row_color}; background-color: white; gridline-color: #a9a9a9; border: 1px solid {border_color}; font-family: Arial, sans-serif; font-size: 9pt;}} QTableView::item {{ padding: 4px; }} QTableView::item:selected {{ background-color: {selection_color}; color: white; }} QHeaderView::section {{ background-color: {header_color}; color: white; padding: 4px; border: none; border-right: 1px solid #d3d3d3; border-bottom: 1px solid {border_color}; font-weight: bold; font-size: 9pt;  }} 
+        
+        #objectExplorerHeader {{ 
+            background-color: {header_color}; 
+            border-bottom: 1px solid {border_color};
+        }}
+        #objectExplorerHeader QLabel {{
+            color: white; 
+            padding: 4px;
+            font-weight: bold; 
+            font-size: 9pt;
+            background-color: transparent;
+            border: none;
+        }}
+        #objectExplorerHeader QToolButton {{
+            background-color: transparent;
+            border: 1px solid transparent;
+            margin: 2px;
+            padding: 2px;
+        }}
+        #objectExplorerHeader QToolButton:hover {{
+            background-color: {selection_color};
+            border: 1px solid {border_color};
+        }}
+        
+        QTableView QTableCornerButton::section {{ background-color: {header_color}; border: 1px solid {border_color}; }} #resultsHeader QPushButton, #editorHeader QPushButton {{ background-color: #ffffff; border: 1px solid {border_color}; padding: 5px 15px; font-size: 9pt; }} #resultsHeader QPushButton:hover, #editorHeader QPushButton:hover {{ background-color: {primary_color}; }} #resultsHeader QPushButton:checked, #editorHeader QPushButton:checked {{ background-color: {selection_color}; border-bottom: 1px solid {selection_color}; font-weight: bold; color: white; }} #resultsHeader, #editorHeader {{ background-color: {alternate_row_color}; padding-bottom: -1px; }} #messageView, #history_details_view, QTextEdit {{ font-family: Consolas, monospace; font-size: 10pt; background-color: white; border: 1px solid {border_color}; }} #tab_status_label {{ padding: 3px 5px; background-color: {alternate_row_color}; border-top: 1px solid {border_color}; }} QGroupBox {{ font-size: 9pt; font-weight: bold; color: {text_color_on_primary}; }} QTabWidget::pane {{ border-top: 1px solid {border_color}; }} QTabBar::tab {{ background: #E0E0E0; border: 1px solid {border_color}; padding: 5px 10px; border-bottom: none; }} QTabBar::tab:selected {{ background: {selection_color}; color: white; }} QComboBox {{ border: 1px solid {border_color}; padding: 2px; background-color: white; }}""")
     
     
     def add_tab(self):
@@ -1435,58 +1535,11 @@ class MainWindow(QMainWindow):
         dialog = TablePropertiesDialog(item_data, table_name, self)
         dialog.exec()
 
-    # def export_schema_table_rows(self, item_data, table_name):
-    #     if not item_data:
-    #         return
-    #     dialog = ExportDialog(
-    #         self, f"{table_name}_{datetime.datetime.now().strftime('%Y%m%d')}.csv")
-    #     if dialog.exec() != QDialog.DialogCode.Accepted:
-    #         return
-        
-    #     options = dialog.get_options()
-    #     if not options['filename']:
-    #         QMessageBox.warning(self, "No Filename",
-    #                             "Export cancelled. No filename specified.")
-    #         return
-    #     if options["delimiter"] == ',':
-    #         options["delimiter"] = None
-    #     full_process_id = str(uuid.uuid4())
-    #     short_id = full_process_id[:8]
-    #     conn_data = item_data['conn_data']
-        
-    #     # --- MODIFICATION: Handle SQLite schema name (which is None) ---
-    #     schema_part = item_data.get('schema_name')
-    #     if schema_part:
-    #         object_name = f"{schema_part}.{table_name}"
-    #     else:
-    #         object_name = table_name
-    #     # --- END MODIFICATION ---
 
-    #     initial_data = {
-    #         "pid": short_id[:8], 
-    #         "type": "Export Data", 
-    #         "status": "Running", 
-    #         "server": conn_data.get('short_name', conn_data['name']), 
-    #         "object": object_name, 
-    #         "time_taken": "...",
-    #         "start_time": datetime.datetime.now().strftime("%Y-%m-%d, %I:%M:%S %p"), 
-    #         "details": f"Exporting to {os.path.basename(options['filename'])}",
-    #         # --- START MODIFICATION (Previous change) ---
-    #         "_conn_id": conn_data.get('id')
-    #         # --- END MODIFICATION ---
-    #     }
-    #     signals = ProcessSignals()
-    #     signals.started.connect(self.handle_process_started)
-    #     signals.finished.connect(self.handle_process_finished)
-    #     signals.error.connect(self.handle_process_error)
-    #     signals.started.emit(short_id, initial_data)
-    #     self.thread_pool.start(RunnableExport(
-    #         short_id, item_data, table_name, options, signals))
     def export_schema_table_rows(self, item_data, table_name):
         if not item_data:
             return
 
-        # 1. এক্সপোর্ট ডায়লগ প্রথমে দেখান এবং ফাইলনেম ও অপশন নিন
         dialog = ExportDialog(
             self, f"{table_name}_{datetime.datetime.now().strftime('%Y%m%d')}.csv")
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -1498,7 +1551,7 @@ class MainWindow(QMainWindow):
                                 "Export cancelled. No filename specified.")
             return
 
-        # 2. ডেটাবেস থেকে সব ডেটা আনার জন্য কোয়েরি তৈরি করুন
+    
         conn_data = item_data['conn_data']
         
         if item_data.get('db_type') == 'postgres':
@@ -1509,23 +1562,16 @@ class MainWindow(QMainWindow):
             query = f'SELECT * FROM "{table_name}";'
             object_name = table_name
 
-        # 3. একটি প্রসেস আইডি তৈরি করুন
+       
         full_process_id = str(uuid.uuid4())
         short_id = full_process_id[:8]
 
-        # 4. একটি 'নেস্টেড' (Nested) ফাংশন তৈরি করুন
-        #    এই ফাংশনটি কোয়েরি সফলভাবে শেষ হলে কল হবে
         def on_data_fetched_for_export(
             _conn_data, _query, results, columns, row_count, _elapsed_time, _is_select_query
         ):
-            """
-            এই নেস্টেড ফাংশনটি RunnableQuery থেকে ডেটা পাওয়ার পর কাজ শুরু করে।
-            এটি RunnableExportFromModel (সঠিক ওয়ার্কার) ব্যবহার করে।
-            """
             
             self.status_message_label.setText("Data fetched. Starting export process...")
 
-            # 4a. কোয়েরি রেজাল্ট থেকে একটি QStandardItemModel তৈরি করুন
             model = QStandardItemModel()
             model.setColumnCount(len(columns))
             model.setRowCount(len(results))
@@ -1535,7 +1581,6 @@ class MainWindow(QMainWindow):
                 for col_idx, cell in enumerate(row):
                     model.setItem(row_idx, col_idx, QStandardItem(str(cell)))
 
-            # 4b. প্রসেস ইনফরমেশন তৈরি করুন (export_result_rows থেকে নেওয়া)
             if export_options["delimiter"] == ',':
                 export_options["delimiter"] = None
 
@@ -1547,7 +1592,7 @@ class MainWindow(QMainWindow):
                "type": "Export Data",
                "status": "Running",
                "server": conn_name,
-               "object": object_name, # টেবিলের নাম
+               "object": object_name,
                "time_taken": "...",
                "start_time": datetime.datetime.now().strftime("%Y-%m-%d, %I:%M:%S %p"),
                "details": f"Exporting {row_count} rows to {os.path.basename(export_options['filename'])}",
@@ -1559,20 +1604,17 @@ class MainWindow(QMainWindow):
             signals.finished.connect(self.handle_process_finished)
             signals.error.connect(self.handle_process_error)
             
-            # 4c. সঠিক ওয়ার্কারটি (RunnableExportFromModel) কল করুন
             self.thread_pool.start(
               RunnableExportFromModel(short_id, model, export_options, signals)
             )
             
             signals.started.emit(short_id, initial_data)
 
-        # 5. ডেটা আনার জন্য RunnableQuery থ্রেড শুরু করুন
         self.status_message_label.setText(f"Fetching data from {table_name} for export...")
         
         query_signals = QuerySignals()
         query_runnable = RunnableQuery(conn_data, query, query_signals)
         
-        # 6. কোয়েরি শেষ হলে উপরের 'নেস্টেড' ফাংশনটি (on_data_fetched_for_export) কল করুন
         query_signals.finished.connect(on_data_fetched_for_export)
         
         query_signals.error.connect(
@@ -1968,61 +2010,6 @@ class MainWindow(QMainWindow):
             # Must set current tab to the new tab before executing
             self.tab_widget.setCurrentWidget(new_tab)
             self.execute_query()
-    
-    # def load_tables_on_expand(self, index: QModelIndex):
-    #     item = self.schema_model.itemFromIndex(index)
-        
-    #     if not item or (item.rowCount() > 0 and item.child(0).text() != "Loading..."):
-    #         return
-
-    #     item_data = item.data(Qt.ItemDataRole.UserRole)
-    #     if not item_data:
-    #         return
-
-    #     db_type = item_data.get('db_type')
-
-    #     if db_type == 'postgres':
-    #         # --- Check if we are expanding a Schema OR a Table ---
-    #         schema_name = item_data.get('schema_name')
-    #         table_name = item_data.get('table_name')
-
-    #         if table_name and schema_name:
-    #             # --- CASE 1: Expanding a POSTGRES TABLE ---
-    #             # This item is a table, load its details
-    #             self.load_postgres_table_details(item, item_data)
-    #         elif schema_name:
-    #             # --- CASE 2: Expanding a POSTGRES SCHEMA ---
-    #             # This is the original logic for expanding a schema to show tables
-    #             item.removeRows(0, item.rowCount()) # "Loading..." মুছি
-    #             try:
-    #                 cursor = self.pg_conn.cursor()
-    #                 cursor.execute("SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = %s ORDER BY table_type, table_name;", (schema_name,))
-    #                 tables = cursor.fetchall()
-    #                 for (table_name, table_type) in tables:
-    #                     icon_path = "assets/table_icon.png" if "TABLE" in table_type else "assets/view_icon.png"
-    #                     table_item = QStandardItem(QIcon(icon_path), table_name)
-    #                     table_item.setEditable(False)
-                        
-    #                     table_data = item_data.copy() 
-    #                     table_data['table_name'] = table_name
-    #                     table_data['table_type'] = table_type
-    #                     table_item.setData(table_data, Qt.ItemDataRole.UserRole)
-                        
-    #                     # Add placeholder to tables to make them expandable
-    #                     if "TABLE" in table_type:
-    #                        table_item.appendRow(QStandardItem("Loading..."))
-
-    #                     item.appendRow(table_item)
-    #             except Exception as e:
-    #                 self.status.showMessage(f"Error expanding schema: {e}", 5000)
-    #                 item.appendRow(QStandardItem(f"Error: {e}"))
-    #         # --------------------------------------------------------
-
-    #     elif db_type == 'sqlite':
-    #         # --- CASE 3: Expanding an SQLITE TABLE ---
-    #         self.load_sqlite_table_details(item, item_data)
-
-    # main_window.py
 
     def load_tables_on_expand(self, index: QModelIndex):
         item = self.schema_model.itemFromIndex(index)
@@ -2048,7 +2035,7 @@ class MainWindow(QMainWindow):
             elif schema_name:
                 # --- CASE 2: Expanding a POSTGRES SCHEMA ---
                 # This is the original logic for expanding a schema to show tables
-                item.removeRows(0, item.rowCount()) # "Loading..." মুছি
+                item.removeRows(0, item.rowCount()) # "Loading..." 
                 try:
                     cursor = self.pg_conn.cursor()
                     cursor.execute("SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = %s ORDER BY table_type, table_name;", (schema_name,))
@@ -2067,14 +2054,12 @@ class MainWindow(QMainWindow):
                         if "TABLE" in table_type:
                            table_item.appendRow(QStandardItem("Loading..."))
 
-                        # --- পরিবর্তন শুরু ---
-                        # 'Type' কলামের জন্য আইটেম তৈরি করুন
                         if "TABLE" in table_type:
                             type_text = "Table"
                         elif "VIEW" in table_type:
                             type_text = "View"
                         else:
-                            # অন্য কোনো টাইপ হলে সেটি দেখাবে (যেমন: 'FOREIGN TABLE')
+                           
                             type_text = table_type.title() 
                         
                         type_item = QStandardItem(type_text)
@@ -2397,7 +2382,6 @@ class MainWindow(QMainWindow):
                     indexes_folder.appendRow(idx_item)
             
             table_item.appendRow(indexes_folder)
-
         except Exception as e:
             if hasattr(self, 'pg_conn') and self.pg_conn:
                 self.pg_conn.rollback() # Rollback any failed transaction
