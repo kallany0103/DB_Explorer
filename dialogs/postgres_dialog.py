@@ -4,12 +4,19 @@ import psycopg2
 from PyQt6.QtWidgets import (
     QDialog, QLineEdit, QFormLayout, QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox
 )
+from PyQt6.QtCore import Qt
 
 class PostgresConnectionDialog(QDialog):
     def __init__(self, parent=None, is_editing=False):
         super().__init__(parent)
         self.setWindowTitle("Edit PostgreSQL Connection" if is_editing else "New PostgreSQL Connection")
-        self.resize(500, 400)
+        # Set default initial size (optional)
+        self.resize(500, 300)
+        
+        # make dialog resizable
+        self.setSizeGripEnabled(True)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.Window)
+        
         self.name_input = QLineEdit()
         self.short_name_input = QLineEdit()
         self.host_input = QLineEdit()

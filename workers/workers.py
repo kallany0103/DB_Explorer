@@ -2,6 +2,7 @@
 import os
 import time
 import pandas as pd
+import cdata.csv as mod  # CData CSV connector
 from PyQt6.QtCore import QRunnable, Qt
 import db
 
@@ -122,6 +123,80 @@ class RunnableExportFromModel(QRunnable):
 
 
 # --- Worker now inherits from QRunnable for use with QThreadPool ---
+# class RunnableQuery(QRunnable):
+#     def __init__(self, conn_data, query, signals):
+#         super().__init__()
+#         self.conn_data = conn_data
+#         self.query = query
+#         self.signals = signals
+#         self._is_cancelled = False
+
+#     def cancel(self):
+#         self._is_cancelled = True
+
+#     def run(self):
+#         conn = None
+#         try:
+#             start_time = time.time()
+#             if not self.conn_data:
+#                 raise ConnectionError("Incomplete connection information.")
+
+#             if "db_path" in self.conn_data and self.conn_data["db_path"]:
+#                 conn = db.create_sqlite_connection(self.conn_data["db_path"])
+#             else:
+#                 conn = db.create_postgres_connection(
+#                     host=self.conn_data["host"], database=self.conn_data["database"],
+#                     user=self.conn_data["user"], password=self.conn_data["password"],
+#                     port=int(self.conn_data["port"])
+#                 )
+            
+#             if not conn:
+#                 raise ConnectionError("Failed to establish database connection.")
+
+#             cursor = conn.cursor()
+#             cursor.execute(self.query)
+
+#             if self._is_cancelled:
+#                 conn.close()
+#                 return
+
+#             row_count = 0
+#             is_select_query = self.query.lower().strip().startswith("select")
+#             results = []
+#             columns = []
+
+#             if is_select_query:
+#                 if cursor.description:
+#                     columns = [desc[0] for desc in cursor.description]
+#                     if not self._is_cancelled:
+#                         results = cursor.fetchall()
+#                         row_count = len(results)
+#                 else:
+#                     row_count = 0
+#             else:
+#                 conn.commit()
+#                 row_count = cursor.rowcount if cursor.rowcount != -1 else 0
+
+#             if self._is_cancelled:
+#                 conn.close()
+#                 return
+
+#             elapsed_time = time.time() - start_time
+#             self.signals.finished.emit(
+#                 self.conn_data, self.query, results, columns, row_count, elapsed_time, is_select_query)
+
+#         except Exception as e:
+#             # if not self._is_cancelled:
+#             #     self.signals.error.emit(str(e))
+#             if not self._is_cancelled:
+#                 elapsed_time = time.time() - start_time if 'start_time' in locals() else 0
+#                 self.signals.error.emit(self.conn_data, self.query, 0, elapsed_time, str(e) )
+#         finally:
+#             if conn:
+#                 conn.close()
+
+
+
 class RunnableQuery(QRunnable):
     def __init__(self, conn_data, query, signals):
         super().__init__()
@@ -135,62 +210,90 @@ class RunnableQuery(QRunnable):
 
     def run(self):
         conn = None
+        cursor = None
+        start_time = time.time()
+
         try:
-            start_time = time.time()
             if not self.conn_data:
                 raise ConnectionError("Incomplete connection information.")
 
-            if "db_path" in self.conn_data and self.conn_data["db_path"]:
-                conn = db.create_sqlite_connection(self.conn_data["db_path"])
-            else:
+            code = (self.conn_data.get("code") or "").upper()
+            if not code:
+                raise ValueError("Connection code missing.")
+
+            # --- CSV via CData ---
+            if code == "CSV":
+                folder_path = self.conn_data.get("db_path")
+                if not folder_path:
+                    raise ValueError("CSV folder path missing.")
+
+                conn = mod.connect(f"URI={folder_path};")
+                cursor = conn.cursor()
+                cursor.execute(self.query)
+
+                columns = [d[0] for d in cursor.description] if cursor.description else []
+                results = cursor.fetchall() if cursor.description else []
+                row_count = len(results)
+                
+            # --- SQLite ---
+            elif code == "SQLITE":
+                import db  # your SQLite helper module
+                db_path = self.conn_data.get("db_path")
+                if not db_path:
+                    raise ValueError("SQLite database path missing.")
+
+                conn = db.create_sqlite_connection(db_path)
+                cursor = conn.cursor()
+                cursor.execute(self.query)
+
+                if self._is_cancelled:
+                    return
+
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
+                results = cursor.fetchall() if cursor.description else []
+                row_count = len(results) if cursor.description else cursor.rowcount
+
+            # --- Postgres ---
+            elif code == "POSTGRES":
+                import db  # your Postgres helper module
                 conn = db.create_postgres_connection(
-                    host=self.conn_data["host"], database=self.conn_data["database"],
-                    user=self.conn_data["user"], password=self.conn_data["password"],
-                    port=int(self.conn_data["port"])
+                    host=self.conn_data["host"],
+                    database=self.conn_data["database"],
+                    user=self.conn_data["user"],
+                    password=self.conn_data["password"],
+                    port=int(self.conn_data["port"]) if self.conn_data.get("port") else 5432
                 )
-            
-            if not conn:
-                raise ConnectionError("Failed to establish database connection.")
+                cursor = conn.cursor()
+                cursor.execute(self.query)
 
-            cursor = conn.cursor()
-            cursor.execute(self.query)
+                if self._is_cancelled:
+                    return
 
-            if self._is_cancelled:
-                conn.close()
-                return
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
+                results = cursor.fetchall() if cursor.description else []
+                row_count = len(results) if cursor.description else cursor.rowcount
 
-            row_count = 0
-            is_select_query = self.query.lower().strip().startswith("select")
-            results = []
-            columns = []
-
-            if is_select_query:
-                if cursor.description:
-                    columns = [desc[0] for desc in cursor.description]
-                    if not self._is_cancelled:
-                        results = cursor.fetchall()
-                        row_count = len(results)
-                else:
-                    row_count = 0
             else:
-                conn.commit()
-                row_count = cursor.rowcount if cursor.rowcount != -1 else 0
+                raise ValueError(f"Unsupported db_type: {db_type}")
 
             if self._is_cancelled:
-                conn.close()
                 return
 
             elapsed_time = time.time() - start_time
+            is_select_query = self.query.lower().strip().startswith("select")
+
+            # Emit results
             self.signals.finished.emit(
-                self.conn_data, self.query, results, columns, row_count, elapsed_time, is_select_query)
+                self.conn_data, self.query, results, columns, row_count, elapsed_time, is_select_query
+            )
 
         except Exception as e:
-            # if not self._is_cancelled:
-            #     self.signals.error.emit(str(e))
             if not self._is_cancelled:
-                elapsed_time = time.time() - start_time if 'start_time' in locals() else 0
-                self.signals.error.emit(self.conn_data, self.query, 0, elapsed_time, str(e) )
+                elapsed_time = time.time() - start_time
+                self.signals.error.emit(self.conn_data, self.query, 0, elapsed_time, str(e))
+
         finally:
+            if cursor:
+                cursor.close()
             if conn:
                 conn.close()
-

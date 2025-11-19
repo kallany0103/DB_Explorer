@@ -4,12 +4,19 @@ import oracledb
 from PyQt6.QtWidgets import (
     QDialog, QLineEdit, QFormLayout, QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox, QTextEdit
 )
+from PyQt6.QtCore import Qt
 
 class OracleConnectionDialog(QDialog):
     def __init__(self, parent=None, is_editing=False):
         super().__init__(parent)
         self.setWindowTitle("Edit Oracle Connection" if is_editing else "New Oracle Connection")
-        self.resize(500, 400)
+        # Set default initial size (optional)
+        self.resize(500, 300)
+        
+        # make dialog resizable
+        self.setSizeGripEnabled(True)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.Window)
+        
         self.name_input = QLineEdit()
         self.user_input = QLineEdit()
         self.password_input = QLineEdit()

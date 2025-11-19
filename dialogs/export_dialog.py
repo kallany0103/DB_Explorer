@@ -9,7 +9,14 @@ class ExportDialog(QDialog):
     def __init__(self, parent=None, default_filename="export.csv"):
         super().__init__(parent)
         self.setWindowTitle("Export Data")
-        self.setMinimumWidth(550)
+        # Set default initial size (optional)
+        self.resize(500, 300)
+        
+        # make dialog resizable
+        self.setSizeGripEnabled(True)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.Window)
+        
+        #self.setMinimumWidth(550)
         main_layout = QVBoxLayout(self)
         tab_widget = QTabWidget()
         main_layout.addWidget(tab_widget)
